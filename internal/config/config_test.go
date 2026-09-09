@@ -1,0 +1,68 @@
+package config
+
+import "testing"
+
+func TestDefaults(t *testing.T) {
+	cfg, err := parse(func(string) (string, bool) { return "", false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ListenAddr != ":8080" || cfg.DataDir != "/data" || cfg.BaseURL != "" {
+		t.Fatalf("unexpected defaults: %+v", cfg)
+	}
+}
+
+func TestEnvironment(t *testing.T) {
+	t.Setenv("PHOTODROP_LISTEN_ADDR", "127.0.0.1:9090")
+	t.Setenv("PHOTODROP_DATA_DIR", "./my data")
+	t.Setenv("PHOTODROP_BASE_URL", "https://photos.example.com/")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ListenAddr != "127.0.0.1:9090" || cfg.DataDir != "./my data" || cfg.BaseURL != "https://photos.example.com" {
+		t.Fatalf("environment not applied: %+v", cfg)
+	}
+}
+
+func TestValidation(t *testing.T) {
+	for _, tt := range []struct {
+		key, value string
+		valid      bool
+	}{
+		{"PHOTODROP_LISTEN_ADDR", "", false},
+		{"PHOTODROP_LISTEN_ADDR", "8080", false},
+		{"PHOTODROP_LISTEN_ADDR", ":0", false},
+		{"PHOTODROP_LISTEN_ADDR", ":65536", false},
+		{"PHOTODROP_LISTEN_ADDR", ":http", false},
+		{"PHOTODROP_LISTEN_ADDR", "bad host:8080", false},
+		{"PHOTODROP_LISTEN_ADDR", "http://localhost:8080", false},
+		{"PHOTODROP_LISTEN_ADDR", "[::1]:8080", true},
+		{"PHOTODROP_LISTEN_ADDR", "localhost:8080", true},
+		{"PHOTODROP_DATA_DIR", "", false},
+		{"PHOTODROP_DATA_DIR", "  ", false},
+		{"PHOTODROP_DATA_DIR", "bad\x00path", false},
+		{"PHOTODROP_DATA_DIR", "./my data", true},
+		{"PHOTODROP_BASE_URL", "", true},
+		{"PHOTODROP_BASE_URL", "https://photos.example.com", true},
+		{"PHOTODROP_BASE_URL", "http://[::1]:8080/", true},
+		{"PHOTODROP_BASE_URL", "photos.example.com", false},
+		{"PHOTODROP_BASE_URL", "ftp://photos.example.com", false},
+		{"PHOTODROP_BASE_URL", "http://", false},
+		{"PHOTODROP_BASE_URL", "http://user:secret@localhost", false},
+		{"PHOTODROP_BASE_URL", "http://localhost:99999", false},
+		{"PHOTODROP_BASE_URL", "http://localhost:", false},
+		{"PHOTODROP_BASE_URL", "http://localhost/path", false},
+		{"PHOTODROP_BASE_URL", "http://localhost?x=1", false},
+		{"PHOTODROP_BASE_URL", "http://localhost?", false},
+		{"PHOTODROP_BASE_URL", "http://localhost#", false},
+		{"PHOTODROP_BASE_URL", "http://%zz", false},
+	} {
+		t.Run(tt.key+"/"+tt.value, func(t *testing.T) {
+			_, err := parse(func(key string) (string, bool) { return tt.value, key == tt.key })
+			if (err == nil) != tt.valid {
+				t.Fatalf("valid=%v, got error %v", tt.valid, err)
+			}
+		})
+	}
+}

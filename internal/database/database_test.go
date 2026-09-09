@@ -1,0 +1,177 @@
+package database
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"testing/fstest"
+
+	"photodrop/migrations"
+)
+
+func openTestDB(t *testing.T, dir string) *sql.DB {
+	t.Helper()
+	db, err := Open(t.Context(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func migrationCount(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM schema_migrations").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func testMigrations(t *testing.T) fstest.MapFS {
+	t.Helper()
+	initial, err := migrations.Files.ReadFile("001_init.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fstest.MapFS{"001_init.sql": &fstest.MapFile{Data: initial}}
+}
+
+func TestInitializationAndRestart(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nested # & data")
+	db := openTestDB(t, dir)
+	if info, err := os.Stat(filepath.Join(dir, "photodrop.db")); err != nil || info.Size() == 0 {
+		t.Fatalf("persistent database not created: %v", err)
+	}
+	var tables int
+	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil || tables != 1 {
+		t.Fatalf("expected only migration bookkeeping, got %d tables: %v", tables, err)
+	}
+	var before string
+	if err := db.QueryRow("SELECT applied_at FROM schema_migrations WHERE version = 1").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db = openTestDB(t, dir)
+	var after string
+	if err := db.QueryRow("SELECT applied_at FROM schema_migrations WHERE version = 1").Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if count := migrationCount(t, db); count != 1 || before != after {
+		t.Fatalf("migration reapplied: count=%d before=%s after=%s", count, before, after)
+	}
+}
+
+func TestMigrationExecutionAndRollback(t *testing.T) {
+	db := openTestDB(t, t.TempDir())
+	files := testMigrations(t)
+	files["002_probe.sql"] = &fstest.MapFile{Data: []byte("CREATE TABLE migration_probe (value TEXT); INSERT INTO migration_probe VALUES ('persisted');")}
+	if err := migrate(t.Context(), db, files); err != nil {
+		t.Fatal(err)
+	}
+	// Repeating a migration containing CREATE TABLE and INSERT would fail or
+	// duplicate data if startup did not correctly skip committed migrations.
+	if err := migrate(t.Context(), db, files); err != nil {
+		t.Fatal(err)
+	}
+	var value string
+	if err := db.QueryRow("SELECT value FROM migration_probe").Scan(&value); err != nil || value != "persisted" || migrationCount(t, db) != 2 {
+		t.Fatalf("migration data missing: %q, %v", value, err)
+	}
+	files["003_broken.sql"] = &fstest.MapFile{Data: []byte("CREATE TABLE rollback_probe (id INTEGER); INSERT INTO nonexistent VALUES (1);")}
+	if err := migrate(t.Context(), db, files); err == nil || !strings.Contains(err.Error(), "003_broken.sql") {
+		t.Fatalf("expected useful migration failure, got %v", err)
+	}
+	var exists bool
+	if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'rollback_probe')").Scan(&exists); err != nil || exists || migrationCount(t, db) != 2 {
+		t.Fatalf("failed migration was not rolled back: exists=%v, err=%v", exists, err)
+	}
+	files["003_broken.sql"].Data = []byte("CREATE TABLE rollback_probe (id INTEGER);")
+	if err := migrate(t.Context(), db, files); err != nil || migrationCount(t, db) != 3 {
+		t.Fatalf("cannot recover after failed migration: %v", err)
+	}
+}
+
+func TestMigrationHistoryProtection(t *testing.T) {
+	db := openTestDB(t, t.TempDir())
+	files := testMigrations(t)
+	files["001_init.sql"].Data = bytes.ReplaceAll(files["001_init.sql"].Data, []byte("\n"), []byte("\r\n"))
+	if err := migrate(t.Context(), db, files); err != nil {
+		t.Fatalf("line endings changed migration identity: %v", err)
+	}
+	files["001_init.sql"].Data = append(files["001_init.sql"].Data, []byte("-- modified\n")...)
+	if err := migrate(t.Context(), db, files); err == nil || !strings.Contains(err.Error(), "changed after application") {
+		t.Fatalf("changed migration accepted: %v", err)
+	}
+	files = testMigrations(t)
+	files["003_gap.sql"] = &fstest.MapFile{Data: []byte("SELECT 1;")}
+	if err := migrate(t.Context(), db, files); err == nil {
+		t.Fatal("accepted gap in migration numbering")
+	}
+	delete(files, "003_gap.sql")
+	files["002_probe.sql"] = &fstest.MapFile{Data: []byte("SELECT 1;")}
+	if err := migrate(t.Context(), db, files); err != nil {
+		t.Fatal(err)
+	}
+	delete(files, "002_probe.sql")
+	if err := migrate(t.Context(), db, files); err == nil || !strings.Contains(err.Error(), "older binary") {
+		t.Fatalf("accepted a database newer than binary: %v", err)
+	}
+}
+
+func TestConcurrentInitialization(t *testing.T) {
+	dir := t.TempDir()
+	start := make(chan struct{})
+	errs := make(chan error, 4)
+	var group sync.WaitGroup
+	for range 4 {
+		group.Go(func() {
+			<-start
+			db, err := Open(t.Context(), dir)
+			if err == nil {
+				err = db.Close()
+			}
+			errs <- err
+		})
+	}
+	close(start)
+	group.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if count := migrationCount(t, openTestDB(t, dir)); count != 1 {
+		t.Fatalf("concurrent initialization applied %d migrations", count)
+	}
+}
+
+func TestInitializationErrors(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(t.Context(), file); err == nil || !strings.Contains(err.Error(), "data directory") {
+		t.Fatalf("expected data directory error, got %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "photodrop.db"), []byte("not SQLite"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(t.Context(), dir); err == nil {
+		t.Fatal("accepted a corrupt database")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := Open(ctx, t.TempDir()); err == nil {
+		t.Fatal("ignored canceled startup")
+	}
+}
