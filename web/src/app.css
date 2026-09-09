@@ -1,0 +1,40 @@
+:root {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #263e33;
+  background: #f4f2eb;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 280px; }
+a { color: inherit; text-underline-offset: 4px; }
+a:focus-visible { outline: 2px solid #304d40; outline-offset: 6px; border-radius: 2px; }
+.page { max-width: 1280px; margin: 0 auto; padding: 0 48px; min-height: 100svh; display: flex; flex-direction: column; }
+header, footer { display: flex; justify-content: space-between; align-items: center; gap: 24px; }
+header { min-height: 108px; border-bottom: 1px solid #d9dcd2; }
+.brand { display: inline-flex; align-items: center; gap: 11px; font-weight: 650; font-size: 19px; text-decoration: none; letter-spacing: -0.6px; }
+.gate { font-size: 12px; color: #606d61; }
+.gate span { padding: 0 10px; color: #7b8779; }
+main { flex: 1; padding: 88px 0 100px; display: flex; align-items: center; flex-direction: column; justify-content: center; text-align: center; }
+.project-mark { padding: 18px; margin-bottom: 28px; border: 1px solid #d9dcd2; border-radius: 28px; background: #faf9f4; box-shadow: 0 8px 28px #263e3307; }
+.project-mark img { display: block; }
+.eyebrow { margin: 0 0 18px; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; font-weight: 600; color: #606d61; }
+h1 { font-size: clamp(56px, 9vw, 96px); line-height: 1.05; font-weight: 550; letter-spacing: -0.065em; margin: 0; }
+.description { margin: 24px 0 36px; color: #58695c; font-size: clamp(16px, 2.6vw, 21px); line-height: 1.5; }
+.status { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border: 1px solid #cbd8c7; border-radius: 999px; background: #e9eee2; color: #36532d; font-size: 13px; line-height: 1.5; }
+.status-dot { width: 7px; height: 7px; flex-shrink: 0; background: #5b7942; border-radius: 50%; }
+.note { max-width: 310px; font-size: 13px; line-height: 1.7; color: #667063; margin: 20px 0 0; }
+footer { min-height: 83px; border-top: 1px solid #d9dcd2; font-size: 11px; color: #606d61; }
+footer a { white-space: nowrap; }
+footer span span { padding: 0 7px; }
+@media (max-width: 600px) {
+  .page { padding: 0 24px; }
+  header { min-height: 88px; }
+  .gate { font-size: 10px; }
+  .gate span { padding: 0 3px; }
+  main { padding: 64px 0; }
+  .status { padding: 11px 13px; font-size: 12px; }
+  footer { flex-direction: column; justify-content: center; align-items: flex-start; gap: 12px; padding: 24px 0; }
+}

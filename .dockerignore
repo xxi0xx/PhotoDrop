@@ -1,0 +1,9 @@
+.git
+.github
+.tmp
+bin
+data
+web/node_modules
+web/dist
+.env
+*.log
