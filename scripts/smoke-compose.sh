@@ -24,6 +24,9 @@ docker compose logs --no-color | grep -q 'HTTP server stopped'
 # Hash the stopped SQLite file so a restart must leave all bookkeeping intact.
 before=$(docker compose run --rm --no-deps --entrypoint sha256sum photodrop /data/photodrop.db)
 docker compose up --wait --wait-timeout 120 -d
+# Compose may recreate the service container after the one-off checksum run.
+# Inspect the currently running container rather than its pre-restart ID.
+container=$(docker compose ps -q photodrop)
 curl --fail --silent --show-error http://localhost:8080/healthz >/dev/null
 docker compose stop
 after=$(docker compose run --rm --no-deps --entrypoint sha256sum photodrop /data/photodrop.db)
