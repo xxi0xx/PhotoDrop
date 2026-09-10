@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,20 +12,36 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"photodrop/internal/auth"
+	"photodrop/internal/config"
+	"photodrop/internal/events"
 )
 
-func New(addr string, assets fs.FS, logger *slog.Logger) (*http.Server, error) {
-	if _, err := fs.ReadFile(assets, "index.html"); err != nil {
+func New(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS, logger *slog.Logger) (*http.Server, error) {
+	index, err := fs.ReadFile(assets, "index.html")
+	if err != nil {
 		return nil, fmt.Errorf("read embedded frontend (run npm ci and npm run build in web/ before building Go): %w", err)
 	}
+	admin, err := auth.New(ctx, db, cfg.AdminPassword)
+	if err != nil {
+		return nil, err
+	}
+	app := &application{events: events.New(db), auth: admin, baseURL: cfg.BaseURL, index: index, logger: logger}
 	mux := http.NewServeMux()
+	app.routes(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Write([]byte("{\"status\":\"ok\"}\n"))
 	})
 	fileServer := http.FileServerFS(assets)
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		name := strings.TrimPrefix(r.URL.Path, "/")
 		if name == "" {
 			name = "index.html"
@@ -34,17 +51,24 @@ func New(addr string, assets fs.FS, logger *slog.Logger) (*http.Server, error) {
 			http.NotFound(w, r)
 			return
 		}
-		// Gate 1 has no client-side router. Unknown URLs and missing assets are
-		// real 404s, and directories never expose a file listing.
+		// Only registered application pages get the Svelte shell. Unknown URLs
+		// and missing assets remain real 404s; no directory listings are exposed.
 		w.Header().Set("Cache-Control", "no-cache")
 		fileServer.ServeHTTP(w, r)
 	})
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/admin") || strings.HasPrefix(r.URL.Path, "/e/") {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("X-Robots-Tag", "noindex, nofollow")
+		}
 		mux.ServeHTTP(w, r)
 	})
 	return &http.Server{
-		Addr:              addr,
+		Addr:              cfg.ListenAddr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,

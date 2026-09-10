@@ -11,9 +11,10 @@ import (
 )
 
 type Config struct {
-	ListenAddr string
-	DataDir    string
-	BaseURL    string
+	ListenAddr    string
+	DataDir       string
+	BaseURL       string
+	AdminPassword string `json:"-"`
 }
 
 func Load() (Config, error) {
@@ -23,9 +24,10 @@ func Load() (Config, error) {
 func parse(lookup func(string) (string, bool)) (Config, error) {
 	cfg := Config{ListenAddr: ":8080", DataDir: "/data"}
 	for key, dst := range map[string]*string{
-		"PHOTODROP_LISTEN_ADDR": &cfg.ListenAddr,
-		"PHOTODROP_DATA_DIR":    &cfg.DataDir,
-		"PHOTODROP_BASE_URL":    &cfg.BaseURL,
+		"PHOTODROP_LISTEN_ADDR":    &cfg.ListenAddr,
+		"PHOTODROP_DATA_DIR":       &cfg.DataDir,
+		"PHOTODROP_BASE_URL":       &cfg.BaseURL,
+		"PHOTODROP_ADMIN_PASSWORD": &cfg.AdminPassword,
 	} {
 		if value, ok := lookup(key); ok {
 			*dst = value
@@ -48,7 +50,17 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 			(u.Port() != "" && !validPort(u.Port())) {
 			return Config{}, fmt.Errorf("PHOTODROP_BASE_URL must be an http(s) origin without credentials, a subpath, query, or fragment (for example https://photos.example.com)")
 		}
+		u.Host = strings.ToLower(u.Host)
+		if (u.Scheme == "https" && u.Port() == "443") || (u.Scheme == "http" && u.Port() == "80") {
+			u.Host = u.Hostname()
+			if strings.Contains(u.Host, ":") {
+				u.Host = "[" + u.Host + "]"
+			}
+		}
 		cfg.BaseURL = strings.TrimSuffix(u.String(), "/")
+	}
+	if len(cfg.AdminPassword) < 12 || len(cfg.AdminPassword) > 72 || strings.TrimSpace(cfg.AdminPassword) == "" || strings.ContainsRune(cfg.AdminPassword, '\x00') {
+		return Config{}, fmt.Errorf("PHOTODROP_ADMIN_PASSWORD is required and must contain 12 to 72 bytes; no default administrator password is provided")
 	}
 	return cfg, nil
 }

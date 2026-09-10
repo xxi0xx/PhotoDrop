@@ -14,6 +14,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"photodrop/internal/config"
+	"photodrop/internal/database"
 	"photodrop/web"
 )
 
@@ -24,7 +26,13 @@ func TestEmbeddedFrontendAndHealth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, err := New(":8080", assets, testLogger())
+	db, err := database.Open(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cfg := config.Config{ListenAddr: ":8080", AdminPassword: "server-test-password"}
+	srv, err := New(t.Context(), cfg, db, assets, testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +77,7 @@ func TestEmbeddedFrontendAndHealth(t *testing.T) {
 	if res := request(http.MethodPost, "/healthz"); res.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST /healthz: expected 405, got %d", res.Code)
 	}
-	if _, err := New(":8080", fstest.MapFS{}, testLogger()); err == nil {
+	if _, err := New(t.Context(), cfg, db, fstest.MapFS{}, testLogger()); err == nil {
 		t.Error("accepted a missing frontend")
 	}
 }

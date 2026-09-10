@@ -1,25 +1,24 @@
+<script lang="ts">
+  import Login from './components/Login.svelte';
+  import Admin from './components/Admin.svelte';
+  import Guest from './components/Guest.svelte';
+  const path = window.location.pathname;
+</script>
+
 <div class="page">
-  <header>
-    <a class="brand" href="/" aria-label="PhotoDrop home">
-      <img src="/favicon.svg" width="32" height="32" alt="" />
-      <span>PhotoDrop</span>
-    </a>
-    <span class="gate">Gate 01 <span aria-hidden="true">/</span> Foundation</span>
-  </header>
-
-  <main>
-    <div class="project-mark" aria-hidden="true">
-      <img src="/favicon.svg" width="64" height="64" alt="" />
-    </div>
-    <p class="eyebrow">A place for shared moments</p>
-    <h1>PhotoDrop</h1>
-    <p class="description">Self-hosted event photo collection.</p>
-    <div class="status"><span class="status-dot" aria-hidden="true"></span>Application foundation is running.</div>
-    <p class="note">This is the beginning. Event collection and uploads are still to come.</p>
-  </main>
-
-  <footer>
-    <span>PhotoDrop <span aria-hidden="true">·</span> Application foundation</span>
-    <a href="/healthz">Health endpoint <span aria-hidden="true">↗</span></a>
-  </footer>
+  <header class="site-header"><a class="brand" href="/" aria-label="PhotoDrop home"><img src="/favicon.svg" width="32" height="32" alt="" /><span>PhotoDrop</span></a>{#if path.startsWith('/admin')}<span class="muted">Administration</span>{/if}</header>
+  {#if path === '/admin/login'}<Login />
+  {:else if path === '/admin' || path === '/admin/' || /^\/admin\/events\/[^/]+$/.test(path)}<Admin {path} />
+  {:else if /^\/e\/[^/]+$/.test(path)}<Guest publicID={path.split('/')[2]} />
+  {:else if path === '/'}
+    <main class="home-content">
+      <img class="project-mark" src="/favicon.svg" width="64" height="64" alt="" />
+      <p class="eyebrow">A place for shared moments</p><h1>PhotoDrop</h1>
+      <p class="description">Self-hosted event photo collection.</p>
+      <p class="status"><span class="status-dot" aria-hidden="true"></span>Application foundation is running.</p>
+      <p class="note">Event pages are ready. Photo and video uploads are still to come.</p>
+      <a class="button" href="/admin">Manage events</a>
+    </main>
+  {:else}<main class="guest-page"><h1>Page not found</h1><a href="/">Return to PhotoDrop</a></main>{/if}
+  <footer><span>PhotoDrop · Event management</span>{#if path === '/'}<a href="/healthz">Health endpoint ↗</a>{/if}</footer>
 </div>

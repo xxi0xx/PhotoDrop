@@ -40,7 +40,7 @@ func run(ctx context.Context, args []string, logger *slog.Logger) error {
 	}
 	startupCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	db, err := database.Open(startupCtx, cfg.DataDir)
-	cancel()
+	defer cancel()
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,10 @@ func run(ctx context.Context, args []string, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("load frontend: %w", err)
 	}
-	srv, err := server.New(cfg.ListenAddr, assets, logger)
+	logger.Info("database initialized and migrations verified")
+	srv, err := server.New(startupCtx, cfg, db, assets, logger)
+	cfg.AdminPassword = ""
+	cancel()
 	if err != nil {
 		return err
 	}

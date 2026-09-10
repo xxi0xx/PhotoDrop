@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,6 +19,10 @@ import (
 // Open creates the data directory and migrates the database before returning it.
 // The caller owns the returned database and must close it after HTTP shutdown.
 func Open(ctx context.Context, dataDir string) (*sql.DB, error) {
+	return open(ctx, dataDir, migrations.Files)
+}
+
+func open(ctx context.Context, dataDir string, files fs.FS) (*sql.DB, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create data directory %q: %w", dataDir, err)
 	}
@@ -57,7 +62,7 @@ func Open(ctx context.Context, dataDir string) (*sql.DB, error) {
 			return nil, fmt.Errorf("set database permissions: %w", err)
 		}
 	}
-	if err := migrate(ctx, db, migrations.Files); err != nil {
+	if err := migrate(ctx, db, files); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate database %q: %w", path, err)
 	}
