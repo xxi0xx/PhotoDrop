@@ -23,6 +23,11 @@ jobs:
           cache: true
       - name: Install frontend dependencies
         run: npm ci --prefix web
+      - name: Configure an ephemeral CI administrator password
+        run: |
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          echo "PHOTODROP_ADMIN_PASSWORD=$password" >> "$GITHUB_ENV"
       - name: Check frontend
         run: npm run check --prefix web
       - name: Build frontend for embedding

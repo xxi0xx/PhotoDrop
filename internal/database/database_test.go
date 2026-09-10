@@ -24,6 +24,16 @@ func openTestDB(t *testing.T, dir string) *sql.DB {
 	return db
 }
 
+func openGate1DB(t *testing.T, dir string) *sql.DB {
+	t.Helper()
+	db, err := open(t.Context(), dir, testMigrations(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
 func migrationCount(t *testing.T, db *sql.DB) int {
 	t.Helper()
 	var count int
@@ -49,8 +59,8 @@ func TestInitializationAndRestart(t *testing.T) {
 		t.Fatalf("persistent database not created: %v", err)
 	}
 	var tables int
-	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil || tables != 1 {
-		t.Fatalf("expected only migration bookkeeping, got %d tables: %v", tables, err)
+	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil || tables != 4 {
+		t.Fatalf("expected migration, events, credential and session tables, got %d: %v", tables, err)
 	}
 	var before string
 	if err := db.QueryRow("SELECT applied_at FROM schema_migrations WHERE version = 1").Scan(&before); err != nil {
@@ -64,13 +74,13 @@ func TestInitializationAndRestart(t *testing.T) {
 	if err := db.QueryRow("SELECT applied_at FROM schema_migrations WHERE version = 1").Scan(&after); err != nil {
 		t.Fatal(err)
 	}
-	if count := migrationCount(t, db); count != 1 || before != after {
+	if count := migrationCount(t, db); count != 3 || before != after {
 		t.Fatalf("migration reapplied: count=%d before=%s after=%s", count, before, after)
 	}
 }
 
 func TestMigrationExecutionAndRollback(t *testing.T) {
-	db := openTestDB(t, t.TempDir())
+	db := openGate1DB(t, t.TempDir())
 	files := testMigrations(t)
 	files["002_probe.sql"] = &fstest.MapFile{Data: []byte("CREATE TABLE migration_probe (value TEXT); INSERT INTO migration_probe VALUES ('persisted');")}
 	if err := migrate(t.Context(), db, files); err != nil {
@@ -100,7 +110,7 @@ func TestMigrationExecutionAndRollback(t *testing.T) {
 }
 
 func TestMigrationHistoryProtection(t *testing.T) {
-	db := openTestDB(t, t.TempDir())
+	db := openGate1DB(t, t.TempDir())
 	files := testMigrations(t)
 	files["001_init.sql"].Data = bytes.ReplaceAll(files["001_init.sql"].Data, []byte("\n"), []byte("\r\n"))
 	if err := migrate(t.Context(), db, files); err != nil {
@@ -149,8 +159,32 @@ func TestConcurrentInitialization(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if count := migrationCount(t, openTestDB(t, dir)); count != 1 {
+	if count := migrationCount(t, openTestDB(t, dir)); count != 3 {
 		t.Fatalf("concurrent initialization applied %d migrations", count)
+	}
+}
+
+func TestGate1Upgrade(t *testing.T) {
+	dir := t.TempDir()
+	db := openGate1DB(t, dir)
+	var checksum, applied string
+	if err := db.QueryRow("SELECT checksum, applied_at FROM schema_migrations WHERE version = 1").Scan(&checksum, &applied); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	db = openTestDB(t, dir)
+	var afterChecksum, afterApplied string
+	if err := db.QueryRow("SELECT checksum, applied_at FROM schema_migrations WHERE version = 1").Scan(&afterChecksum, &afterApplied); err != nil {
+		t.Fatal(err)
+	}
+	if migrationCount(t, db) != 3 || checksum != afterChecksum || applied != afterApplied {
+		t.Fatal("Gate 1 history was changed during upgrade")
+	}
+	for _, table := range []string{"events", "admin_credential", "admin_sessions"} {
+		var exists bool
+		if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = ? AND type = 'table')", table).Scan(&exists); err != nil || !exists {
+			t.Fatalf("missing %s: %v", table, err)
+		}
 	}
 }
 

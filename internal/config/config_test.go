@@ -1,9 +1,40 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestMissingAdministratorPassword(t *testing.T) {
+	_, err := parse(func(string) (string, bool) { return "", false })
+	if err == nil || !strings.Contains(err.Error(), "PHOTODROP_ADMIN_PASSWORD is required") {
+		t.Fatalf("missing credential must fail explicitly: %v", err)
+	}
+}
+
+func TestCanonicalBaseURL(t *testing.T) {
+	for input, expected := range map[string]string{
+		"https://Photos.Example.com:443/": "https://photos.example.com",
+		"http://LOCALHOST:80/":            "http://localhost",
+		"https://[::1]:443/":              "https://[::1]",
+		"http://localhost:8080/":          "http://localhost:8080",
+	} {
+		t.Run(input, func(t *testing.T) {
+			cfg, err := parse(func(key string) (string, bool) {
+				if key == "PHOTODROP_BASE_URL" {
+					return input, true
+				}
+				return "test-password-for-config", key == "PHOTODROP_ADMIN_PASSWORD"
+			})
+			if err != nil || cfg.BaseURL != expected {
+				t.Fatalf("base URL = %q, error = %v; want %q", cfg.BaseURL, err, expected)
+			}
+		})
+	}
+}
 
 func TestDefaults(t *testing.T) {
-	cfg, err := parse(func(string) (string, bool) { return "", false })
+	cfg, err := parse(func(key string) (string, bool) { return "test-password-for-config", key == "PHOTODROP_ADMIN_PASSWORD" })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -13,6 +44,7 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestEnvironment(t *testing.T) {
+	t.Setenv("PHOTODROP_ADMIN_PASSWORD", "test-password-for-config")
 	t.Setenv("PHOTODROP_LISTEN_ADDR", "127.0.0.1:9090")
 	t.Setenv("PHOTODROP_DATA_DIR", "./my data")
 	t.Setenv("PHOTODROP_BASE_URL", "https://photos.example.com/")
@@ -57,9 +89,20 @@ func TestValidation(t *testing.T) {
 		{"PHOTODROP_BASE_URL", "http://localhost?", false},
 		{"PHOTODROP_BASE_URL", "http://localhost#", false},
 		{"PHOTODROP_BASE_URL", "http://%zz", false},
+		{"PHOTODROP_ADMIN_PASSWORD", "", false},
+		{"PHOTODROP_ADMIN_PASSWORD", "too-short", false},
+		{"PHOTODROP_ADMIN_PASSWORD", strings.Repeat("x", 73), false},
+		{"PHOTODROP_ADMIN_PASSWORD", "password-with-\x00-null", false},
+		{"PHOTODROP_ADMIN_PASSWORD", "            ", false},
+		{"PHOTODROP_ADMIN_PASSWORD", "test-password-for-config", true},
 	} {
 		t.Run(tt.key+"/"+tt.value, func(t *testing.T) {
-			_, err := parse(func(key string) (string, bool) { return tt.value, key == tt.key })
+			_, err := parse(func(key string) (string, bool) {
+				if key == tt.key {
+					return tt.value, true
+				}
+				return "test-password-for-config", key == "PHOTODROP_ADMIN_PASSWORD"
+			})
 			if (err == nil) != tt.valid {
 				t.Fatalf("valid=%v, got error %v", tt.valid, err)
 			}

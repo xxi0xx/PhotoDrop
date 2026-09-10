@@ -7,6 +7,9 @@ docker compose up --build --wait --wait-timeout 120 -d
 curl --fail --silent --show-error http://localhost:8080/healthz | grep -q '"status":"ok"'
 curl --fail --silent --show-error http://localhost:8080/ | grep -q '<title>PhotoDrop</title>'
 
+# Uses only Node's built-in APIs on the development/CI host, never the runtime.
+node scripts/smoke-events.mjs
+
 container=$(docker compose ps -q photodrop)
 docker compose exec -T photodrop sh -ec '
     test -s /data/photodrop.db
