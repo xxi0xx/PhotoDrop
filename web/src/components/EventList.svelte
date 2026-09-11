@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { request, message, displayDate, type EventRecord } from '../lib/api';
+  import { request, message, displayDate, formatBytes, type EventRecord } from '../lib/api';
   let events = $state<EventRecord[]>([]); let loading = $state(true); let error = $state('');
   async function load() {
     loading = true; error = '';
@@ -21,6 +21,8 @@
       <article class="event-card">
         <div class="event-card-top"><h2><a href={`/admin/events/${event.id}`}>{event.name}</a></h2><span class:open={event.status === 'open'} class="badge">{event.status === 'open' ? 'Open' : event.status === 'disabled' ? 'Disabled' : 'Expired'}</span></div>
         <p class="muted">{displayDate(event.event_date)}</p>
+        <p class="media-stats">Photos: {event.media.photo_count} · Storage: {formatBytes(event.media.storage_bytes)}</p>
+        {#if event.deleting}<p class="error">Media cleanup is pending. Open Manage and retry deletion.</p>{/if}
         <div class="event-card-bottom"><a href={event.public_url} target="_blank" rel="noopener noreferrer">Public event page ↗</a><a class="button secondary" href={`/admin/events/${event.id}`}>Manage<span class="sr-only"> {event.name}</span></a></div>
       </article>
     {/each}</div>

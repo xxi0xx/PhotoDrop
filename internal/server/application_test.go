@@ -30,7 +30,7 @@ func TestAdminAndGuestWorkflow(t *testing.T) {
 	var logs bytes.Buffer
 	const password = "server-workflow-test-password"
 	const origin = "https://photos.example.com"
-	srv, err := New(t.Context(), config.Config{ListenAddr: ":8080", BaseURL: origin, AdminPassword: password}, db, assets, slog.New(slog.NewTextHandler(&logs, nil)))
+	srv, err := New(t.Context(), config.Config{ListenAddr: ":8080", DataDir: t.TempDir(), BaseURL: origin, AdminPassword: password}, db, assets, slog.New(slog.NewTextHandler(&logs, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

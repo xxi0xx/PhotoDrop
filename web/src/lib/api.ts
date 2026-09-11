@@ -3,8 +3,14 @@ export type EventRecord = {
   id: number; public_id: string; name: string; description: string;
   event_date: string | null; enabled: boolean; expires_at: string | null;
   created_at: string; updated_at: string; status: 'open' | 'disabled' | 'expired'; public_url: string;
+  deleting: boolean; media: { photo_count: number; storage_bytes: number };
 };
-export type GuestEvent = { name: string; status: 'open' | 'closed'; description?: string; event_date?: string };
+export type GuestEvent = { name: string; status: 'open' | 'closed'; description?: string; event_date?: string; max_file_size?: number };
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
 export class APIError extends Error {
   constructor(message: string, public status: number, public fields: Record<string, string> = {}) { super(message); }
 }

@@ -96,6 +96,19 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .guest-page h1 { font-size: clamp(32px, 7vw, 56px); }
 .guest-date { font-size: 18px; color: #5c695e; margin: 24px 0; }
 .guest-description { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 17px; margin: 32px 0; }
+.upload-panel { margin-top: 40px; padding: 28px; background: #faf9f4; border: 1px solid #d1d7cb; border-radius: 10px; text-align: left; }
+.upload-panel > .muted { font-size: 13px; }
+.upload-panel input[type="file"] { font-size: 14px; }
+.upload-panel input::file-selector-button { border: 0; border-radius: 5px; padding: 10px 12px; background: #304d40; color: white; margin-right: 12px; cursor: pointer; }
+.upload-list { list-style: none; padding: 0; margin: 24px 0; max-height: 420px; overflow-y: auto; }
+.upload-list li { border-top: 1px solid #d9dcd2; padding: 16px 0; }
+.upload-row { display: flex; gap: 16px; justify-content: space-between; align-items: baseline; font-size: 14px; }
+.upload-row .filename { overflow-wrap: anywhere; min-width: 0; }
+.upload-row > span:last-child { flex-shrink: 0; font-size: 12px; }
+.upload-success { color: #36532d; }
+.upload-thanks { margin: 24px 0; color: #36532d; }
+.media-stats { font-size: 14px; color: #36532d; }
+progress { display: block; width: 100%; height: 12px; margin: 12px 0; accent-color: #527342; }
 .coming-soon, .closed-notice { border: 1px solid #d1d7cb; border-radius: 9px; padding: 24px; margin-top: 40px; background: #faf9f4; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 @media (max-width: 650px) {
@@ -106,4 +119,5 @@ fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
   .guest-page, .login-panel { padding: 48px 0; }
   .actions { gap: 14px; }
   .link-panel { padding: 16px; }
+  .upload-panel { padding: 20px 16px; }
 }

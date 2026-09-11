@@ -95,6 +95,12 @@ func TestValidation(t *testing.T) {
 		{"PHOTODROP_ADMIN_PASSWORD", "password-with-\x00-null", false},
 		{"PHOTODROP_ADMIN_PASSWORD", "            ", false},
 		{"PHOTODROP_ADMIN_PASSWORD", "test-password-for-config", true},
+		{"PHOTODROP_MAX_FILE_SIZE", "", false},
+		{"PHOTODROP_MAX_FILE_SIZE", "0", false},
+		{"PHOTODROP_MAX_FILE_SIZE", "-1", false},
+		{"PHOTODROP_MAX_FILE_SIZE", "50MB", false},
+		{"PHOTODROP_MAX_FILE_SIZE", "1073741825", false},
+		{"PHOTODROP_MAX_FILE_SIZE", "52428800", true},
 	} {
 		t.Run(tt.key+"/"+tt.value, func(t *testing.T) {
 			_, err := parse(func(key string) (string, bool) {

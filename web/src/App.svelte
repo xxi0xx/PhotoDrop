@@ -16,9 +16,9 @@
       <p class="eyebrow">A place for shared moments</p><h1>PhotoDrop</h1>
       <p class="description">Self-hosted event photo collection.</p>
       <p class="status"><span class="status-dot" aria-hidden="true"></span>Application foundation is running.</p>
-      <p class="note">Event pages are ready. Photo and video uploads are still to come.</p>
+      <p class="note">Create an event and invite guests to share their photos.</p>
       <a class="button" href="/admin">Manage events</a>
     </main>
   {:else}<main class="guest-page"><h1>Page not found</h1><a href="/">Return to PhotoDrop</a></main>{/if}
-  <footer><span>PhotoDrop · Event management</span>{#if path === '/'}<a href="/healthz">Health endpoint ↗</a>{/if}</footer>
+  <footer><span>PhotoDrop · Shared moments</span>{#if path === '/'}<a href="/healthz">Health endpoint ↗</a>{/if}</footer>
 </div>

@@ -59,8 +59,8 @@ func TestInitializationAndRestart(t *testing.T) {
 		t.Fatalf("persistent database not created: %v", err)
 	}
 	var tables int
-	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil || tables != 4 {
-		t.Fatalf("expected migration, events, credential and session tables, got %d: %v", tables, err)
+	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil || tables != 6 {
+		t.Fatalf("expected six migration/domain tables, got %d: %v", tables, err)
 	}
 	var before string
 	if err := db.QueryRow("SELECT applied_at FROM schema_migrations WHERE version = 1").Scan(&before); err != nil {
@@ -74,7 +74,7 @@ func TestInitializationAndRestart(t *testing.T) {
 	if err := db.QueryRow("SELECT applied_at FROM schema_migrations WHERE version = 1").Scan(&after); err != nil {
 		t.Fatal(err)
 	}
-	if count := migrationCount(t, db); count != 3 || before != after {
+	if count := migrationCount(t, db); count != 4 || before != after {
 		t.Fatalf("migration reapplied: count=%d before=%s after=%s", count, before, after)
 	}
 }
@@ -159,7 +159,7 @@ func TestConcurrentInitialization(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if count := migrationCount(t, openTestDB(t, dir)); count != 3 {
+	if count := migrationCount(t, openTestDB(t, dir)); count != 4 {
 		t.Fatalf("concurrent initialization applied %d migrations", count)
 	}
 }
@@ -177,14 +177,59 @@ func TestGate1Upgrade(t *testing.T) {
 	if err := db.QueryRow("SELECT checksum, applied_at FROM schema_migrations WHERE version = 1").Scan(&afterChecksum, &afterApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount(t, db) != 3 || checksum != afterChecksum || applied != afterApplied {
+	if migrationCount(t, db) != 4 || checksum != afterChecksum || applied != afterApplied {
 		t.Fatal("Gate 1 history was changed during upgrade")
 	}
-	for _, table := range []string{"events", "admin_credential", "admin_sessions"} {
+	for _, table := range []string{"events", "admin_credential", "admin_sessions", "upload_sessions", "assets"} {
 		var exists bool
 		if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = ? AND type = 'table')", table).Scan(&exists); err != nil || !exists {
 			t.Fatalf("missing %s: %v", table, err)
 		}
+	}
+}
+
+func TestGate2UpgradePreservesEventsAndSessions(t *testing.T) {
+	dir := t.TempDir()
+	files := testMigrations(t)
+	for _, name := range []string{"002_events.sql", "003_admin_sessions.sql"} {
+		content, err := migrations.Files.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[name] = &fstest.MapFile{Data: content}
+	}
+	db, err := open(t.Context(), dir, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO events(public_id, name, enabled, created_at, updated_at) VALUES ('AAAAAAAAAAAAAAAAAAAAAAAA', 'Existing event', 1, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z'); INSERT INTO admin_credential(id, password_hash) VALUES (1, 'test hash'); INSERT INTO admin_sessions(token_hash, csrf_token, created_at, expires_at) VALUES ('test token digest', 'test csrf', 1, 2);`); err != nil {
+		t.Fatal(err)
+	}
+	var before string
+	if err := db.QueryRow("SELECT group_concat(checksum || applied_at, ',') FROM (SELECT checksum, applied_at FROM schema_migrations ORDER BY version)").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	db = openTestDB(t, dir)
+	var after, name string
+	var deleting bool
+	var sessions int
+	if err := db.QueryRow("SELECT group_concat(checksum || applied_at, ',') FROM (SELECT checksum, applied_at FROM schema_migrations WHERE version <= 3 ORDER BY version)").Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT name, deleting FROM events WHERE id = 1").Scan(&name, &deleting); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM admin_sessions").Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if after != before || name != "Existing event" || deleting || sessions != 1 || migrationCount(t, db) != 4 {
+		t.Fatal("Gate 2 data/history changed during upgrade")
+	}
+	db.Close()
+	db = openTestDB(t, dir)
+	if migrationCount(t, db) != 4 {
+		t.Fatal("restart reapplied migration")
 	}
 }
 

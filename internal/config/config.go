@@ -10,11 +10,14 @@ import (
 	"strings"
 )
 
+const DefaultMaxFileSize int64 = 50 * 1024 * 1024
+
 type Config struct {
 	ListenAddr    string
 	DataDir       string
 	BaseURL       string
 	AdminPassword string `json:"-"`
+	MaxFileSize   int64
 }
 
 func Load() (Config, error) {
@@ -22,7 +25,7 @@ func Load() (Config, error) {
 }
 
 func parse(lookup func(string) (string, bool)) (Config, error) {
-	cfg := Config{ListenAddr: ":8080", DataDir: "/data"}
+	cfg := Config{ListenAddr: ":8080", DataDir: "/data", MaxFileSize: DefaultMaxFileSize}
 	for key, dst := range map[string]*string{
 		"PHOTODROP_LISTEN_ADDR":    &cfg.ListenAddr,
 		"PHOTODROP_DATA_DIR":       &cfg.DataDir,
@@ -34,6 +37,13 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		}
 	}
 
+	if value, ok := lookup("PHOTODROP_MAX_FILE_SIZE"); ok {
+		size, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || size < 1 || size > 1024*1024*1024 || strings.Trim(value, "0123456789") != "" {
+			return Config{}, fmt.Errorf("PHOTODROP_MAX_FILE_SIZE must be an integer byte count from 1 to 1073741824")
+		}
+		cfg.MaxFileSize = size
+	}
 	host, port, err := net.SplitHostPort(cfg.ListenAddr)
 	if err != nil || !validPort(port) || (host != "" && !validHost(host)) {
 		return Config{}, fmt.Errorf("PHOTODROP_LISTEN_ADDR must be host:port (for example :8080), with a port from 1 to 65535")

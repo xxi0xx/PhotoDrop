@@ -10,12 +10,15 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"photodrop/internal/auth"
 	"photodrop/internal/config"
 	"photodrop/internal/events"
+	"photodrop/internal/media"
+	"photodrop/internal/storage"
 )
 
 func New(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS, logger *slog.Logger) (*http.Server, error) {
@@ -27,7 +30,18 @@ func New(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS, logge
 	if err != nil {
 		return nil, err
 	}
-	app := &application{events: events.New(db), auth: admin, baseURL: cfg.BaseURL, index: index, logger: logger}
+	objects, err := storage.NewLocal(filepath.Join(cfg.DataDir, "uploads"))
+	if err != nil {
+		return nil, err
+	}
+	uploads := media.New(db, objects, logger)
+	if err := uploads.Cleanup(ctx); err != nil {
+		return nil, fmt.Errorf("clean incomplete uploads: %w", err)
+	}
+	if cfg.MaxFileSize == 0 {
+		cfg.MaxFileSize = config.DefaultMaxFileSize
+	}
+	app := &application{events: events.New(db), auth: admin, media: uploads, maxFileSize: cfg.MaxFileSize, baseURL: cfg.BaseURL, index: index, logger: logger}
 	mux := http.NewServeMux()
 	app.routes(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

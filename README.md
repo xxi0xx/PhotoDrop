@@ -1,19 +1,21 @@
 # PhotoDrop
 
-PhotoDrop is a self-hosted project for event photo and video collection.
-**Gate 2 implements event management:** one administrator can sign in, create and
-manage events, and share independent public guest landing pages. The Gate 1
-foundation, health endpoint, embedded frontend, and SQLite persistence remain.
+PhotoDrop is a self-hosted event photo collection app. **Gate 3 adds anonymous
+image uploads to local storage:** guests select photos, see per-file and overall
+progress, and retry failed files. One administrator manages events and sees
+completed photo counts and storage totals. The Go/Svelte/SQLite foundation,
+authentication, event links, and one-container deployment remain intact.
 
-**Uploads, media storage, S3, Cloudflare R2, Immich integration, QR generation,
-and exports are not implemented.** Guest pages explain that photo sharing will
-be available later; there are no upload controls or endpoints.
+**S3, Cloudflare R2, direct-to-object-storage uploads, video, resumable multipart
+uploads, Immich, QR generation, public downloads, galleries, thumbnails, exports,
+contributor names, Turnstile, and rate limiting are not implemented.**
 
 ## Architecture
 
 - One Go executable serves HTTP and the compiled Svelte frontend on port 8080.
 - SQLite uses `database/sql` and the CGO-free `modernc.org/sqlite` driver; no ORM.
 - SQL migrations and frontend assets are embedded at build time.
+- SQLite stores metadata; original image bytes live under `/data/uploads`.
 - One production container and one `/data` volume; no external database, Redis,
   Node.js runtime, or reverse proxy is required.
 - Structured JSON logs go to stdout. SIGINT/SIGTERM drains HTTP requests for up
@@ -101,6 +103,9 @@ history/concurrency, HTTP health, embedded JS/CSS, 404s, and draining active
 requests during shutdown. Gate 2 adds authentication, cookie/CSRF checks, session
 rotation/logout/expiry/persistence, password changes, event CRUD/validation,
 public-ID invariants, guest availability, and a Gate 1 database upgrade test.
+Gate 3 adds bounded streaming, image validation, upload lifecycle and cleanup,
+session/event isolation, concurrent uploads, safe media deletion, ready-only
+statistics, and a Gate 2 database upgrade test.
 The race detector requires a C toolchain; CI runs it on Linux. In PowerShell,
 set `$env:CGO_ENABLED = '0'` for the CGO-free commands instead of shell prefixes.
 Ordinary tests inject their own credentials and do not need a configured password.
@@ -159,7 +164,8 @@ Both preserve the bind-mounted database at **`./data/photodrop.db`**. The defaul
 container data directory is **`/data`**. SQLite may create a temporary rollback
 journal alongside the database; keep the entire data directory on persistent
 local storage. To back up PhotoDrop, stop the service and copy `./data` to secure
-storage. It contains password hashes, sessions, and event information.
+storage. Back up the whole directory together: it contains password hashes,
+sessions, event/asset metadata, and uploaded photos. Do not back up only SQLite.
 
 Build the image separately with:
 
@@ -188,7 +194,11 @@ docker compose down
 It builds the image and runs `node scripts/smoke-events.mjs`: login, CSRF rejection,
 two independent events, public lookup, disable/expire/re-enable/edit, persistence
 of the same session and event across restart, deletion, public 404, and logout.
-The script creates only temporary test events and removes them. It then verifies
+It also runs `node scripts/smoke-uploads.mjs` with a tiny embedded PNG fixture:
+anonymous sessions, concurrent uploads with duplicate/path-like filenames,
+non-image rejection, cross-event isolation, closed-event rejection, admin totals,
+media hashes across restart, and event deletion that preserves unrelated media.
+Both scripts create only temporary test events and remove them. It then verifies
 HTTP and non-root execution, checks that Node/npm/Go are absent from the runtime,
 stops via SIGTERM, compares the stopped database before/after restart, and checks
 clean exit codes. It preserves existing events and leaves the container stopped;
@@ -206,6 +216,7 @@ CI uses an ephemeral masked password and runs this script; it never publishes im
 Each event has an immutable public URL such as `/e/Nk4Pr8sVhx7JQ2mC9Lwu0aBd`.
 Anyone with that link can view the guest page without signing in. Internal SQLite
 IDs are used only by administration; they do not work as guest identifiers.
+Anyone with an open event link can also upload supported images.
 Disabling or expiring an event keeps it in the admin list and shows guests a
 generic closed page containing its name. Closed pages omit the description/date
 and do not disclose why the event closed. Deleted or unknown links return HTTP 404.
@@ -217,7 +228,123 @@ is an optional instant supplied as RFC3339 with a timezone and persisted in UTC.
 The editor displays/accepts expiration in the administrator's local timezone.
 An event is open only when enabled and the current time is strictly before its
 expiration, if set. Expiration never deletes data. Status is evaluated when
-fetching the event; an already-open guest page updates when reloaded.
+fetching the event; an already-open guest page updates when reloaded. Uploads
+independently recheck availability before accepting a file and before marking it
+ready, so a stale browser page cannot upload to an event that has closed.
+
+## Guest uploads and local storage
+
+Open an event link, choose up to **100 images per browser batch**, then choose
+**Upload Photos**. PhotoDrop sends one request per image, with at most **three
+concurrent transfers**. Each row shows waiting, progress/finishing, uploaded, or
+failed state; overall progress uses the selected files' byte totals. **Retry
+Failed** retries only failed files. **Cancel uploads** stops queued requests and
+aborts active transfers without deleting completed photos. After success, use
+**Add More Photos** for a new batch. No file previews or gallery are provided.
+
+Supported types are **JPEG, PNG, WebP, GIF, HEIC, and HEIF**. The default limit is
+**52,428,800 bytes (50 MiB) per file**, configured with `PHOTODROP_MAX_FILE_SIZE`.
+The browser's `accept="image/*"` is a picker hint; the server independently
+validates the original filename, declared media type, initial content bytes,
+and actual streamed byte count. Missing/empty files and unsupported types such
+as SVG, AVIF, video, or disguised text are rejected. HEIC/HEIF detection uses a
+bounded initial `ftyp` brand check; an `ftyp` box beyond the first 512 bytes is
+not supported. Validation is lightweight signature sniffing, not full image
+decoding, malware detection, or a guarantee that every image decoder can open a file.
+
+Files live at `PHOTODROP_DATA_DIR/uploads/e<internal-event-id>_<random-asset-id>`.
+These flat keys are generated server-side using 128 random bits per asset.
+Original filenames are preserved verbatim as metadata (1–255 valid Unicode
+characters; no NUL/newline, not whitespace-only) and rendered as escaped text.
+They never participate in a storage path. Key syntax is strictly validated;
+Go's `os.Root` confines operations to storage. Deletion also verifies that the
+key belongs to the asset and event in question, and removes only individual
+files, without recursive deletion or following final symlinks. An upload-root
+symlink is rejected. Directories use mode 0700 and new files use mode 0600 on
+Linux; media is not executable. No media path is served over HTTP.
+
+`internal/media` manages authorization and metadata through a small `Store`
+interface (`Put` and `Delete`). Only `internal/storage.Local` handles filesystem
+operations. There is no cloud implementation or speculative presigning API.
+
+### Upload API and lifecycle
+
+Both guest endpoints are anonymous and ignore admin cookies/privileges. They
+require the existing same-origin `Origin`/`Referer` check, **not an admin CSRF
+token**. There is no cross-origin upload API.
+
+| Method | Route | Request / response |
+| --- | --- | --- |
+| POST | `/api/public/events/{public_id}/upload-sessions` | JSON `{}`; returns `{"upload_session":{"id":"..."}}` with HTTP 201 |
+| POST | `/api/public/events/{public_id}/upload-sessions/{session_id}/assets` | One raw image body; returns guest-safe asset metadata with HTTP 201 |
+
+Each upload session has a random 128-bit ID and belongs to exactly one event.
+The file request supplies `Content-Type` and `Content-Disposition: attachment;
+filename*=UTF-8''IMG_1234.JPG` (percent-encode the UTF-8 filename). No multipart
+form envelope is used. The browser sends the `File` directly with XMLHttpRequest
+for real upload-progress events; it never converts files into base64.
+
+Success returns `{"asset":{"id":"...","filename":"IMG_1234.JPG",
+"mime_type":"image/jpeg","size":1234,"status":"ready"}}`. It contains no
+internal event ID, storage key, or filesystem path. Errors use the existing JSON
+envelope: 413 for oversize, 415 for unsupported content, 422 for empty files or
+invalid filenames, 409 for closed events, and 404 for unknown events or sessions
+that do not belong to that event. SQL/filesystem errors are logged internally
+and return safe generic messages. Original filenames, upload session IDs, file
+contents, and credentials are not logged.
+
+The persistence sequence is:
+
+1. Verify the event/session association and create a `pending` asset in a short
+   SQLite transaction, then commit before reading the image stream.
+2. Sniff at most 512 bytes, then stream through bounded readers and a fixed
+   32 KiB copy buffer into an exclusively created `<key>.part` file.
+3. Check the actual byte limit, flush and close the file, and rename to its final
+   key on the same filesystem. Verify final size; sync the directory on Linux.
+4. Recheck event availability, mark the asset `ready`, record MIME/size/completion
+   time, and update its upload session in a short SQLite transaction.
+
+Only then is success reported. Failed attempts remove temporary/final objects
+and their pending metadata. If cleanup fails, the pending row remains as a
+recovery record. SQLite transactions are never held while receiving media.
+`Content-Length` is an early check, not the limit: unknown-length/chunked requests
+are also bounded. The upload path extends read/write deadlines to ten minutes;
+other requests keep the existing 15-second read/30-second write deadlines, and
+header reads remain limited to five seconds. A normal HTTPS reverse proxy needs
+to allow the configured request size/duration; no buffering, special forwarded
+headers, proxy dependency, or extra container is required.
+
+Retries create a new asset attempt and cannot overwrite a completed object.
+Completion state is retained only in the current page session. If the server
+committed a photo but its success response was lost, a retry may create a second
+copy; there is no durable idempotency or content deduplication. Upload session IDs
+are grouping capabilities, not guest identities or permanent resumability.
+
+### Restart cleanup and event deletion
+
+Completed files and metadata survive restart. At startup, PhotoDrop attempts
+cleanup of at most **1,000 pending assets older than one hour**, including both
+`.part` and already-renamed files. Recent pending rows remain incomplete and
+never count as uploaded photos; another restart after they age retries cleanup.
+Cleanup failures are logged and retain their metadata. There is no periodic
+worker or unbounded full-filesystem scan. Normal shutdown drains for ten seconds;
+transfers that outlast shutdown can be interrupted and recovered by this policy.
+Run **one PhotoDrop instance per data directory**; event transfer/deletion locks
+are local to that process, and sharing storage between live instances is unsupported.
+
+Admin event responses contain `media.photo_count` and `media.storage_bytes`,
+calculated in SQLite from **ready assets only**. Refresh the event list or reload
+the editor to see new uploads. There is no individual-photo browsing/deletion UI.
+
+Deleting an event now permanently removes its photos and upload metadata. If
+transfers are active for that event, deletion returns 409; disable the event and
+retry once active transfers finish. Cleanup persists a `deleting` flag, disables
+the event, and blocks edits/new uploads. Before removing each file it takes that
+asset out of ready state, then removes its files and row. On partial failure the
+event stays closed and visible with a cleanup warning; retry **Delete event** to
+continue. The event/session rows are removed only after media cleanup succeeds.
+Unrelated events' files are never deletion targets. There is no total-storage
+quota in this gate; disk capacity remains an operator responsibility.
 
 ## Authentication and API
 
@@ -251,7 +378,7 @@ as `{"error":{"code":"...","message":"...","fields":{...}}}` (fields optional).
 | POST | `/api/admin/logout` | Session + origin + CSRF; revokes session |
 | GET / POST | `/api/admin/events` | List / create; admin only |
 | GET / PUT / DELETE | `/api/admin/events/{id}` | Read / replace editable fields / delete; admin only |
-| GET | `/api/public/events/{public_id}` | Public name/status and open-event description/date only |
+| GET | `/api/public/events/{public_id}` | Public name/status and open-event description/date/upload limit |
 
 Create/update bodies contain `name`, optional `description`, nullable `event_date`,
 required boolean `enabled`, and nullable `expires_at`. IDs/timestamps cannot be
@@ -279,6 +406,7 @@ appropriate for your deployment.
 | `PHOTODROP_DATA_DIR` | `/data` | Directory for `photodrop.db`; created on startup. Set `./data` for non-container development. |
 | `PHOTODROP_BASE_URL` | unset | Public HTTP(S) origin, e.g. `https://photos.example.com`. Used for guest links, CSRF origin, and HTTPS cookie security. |
 | `PHOTODROP_ADMIN_PASSWORD` | **required; no default** | Single administrator password, 12–72 bytes, not whitespace-only and without NUL. Changing it and restarting revokes sessions. |
+| `PHOTODROP_MAX_FILE_SIZE` | `52428800` | Maximum bytes per image (50 MiB); integer from 1 to 1073741824 (1 GiB). |
 
 Explicitly empty listen/data values are invalid. The optional base URL accepts
 an empty value or a full origin with an optional trailing slash, but no
@@ -296,6 +424,9 @@ internal/config/    environment parsing and validation
 internal/database/  SQLite initialization and transactional migrations
 internal/auth/      administrator password and persistent opaque sessions
 internal/events/    validation, random public IDs, and explicit SQLite queries
+internal/media/     upload authorization, asset lifecycle, statistics, cleanup
+internal/storage/   bounded local writes and confined object deletion
+internal/testutil/  tiny generated image fixtures for tests
 internal/server/    protected APIs/pages, public lookup, health, and shutdown
 migrations/         embedded, numbered SQL files
 web/                Svelte source, Vite build, and Go embedding
@@ -306,8 +437,10 @@ scripts/            Compose smoke checks
 `001_init.sql` remains unchanged and creates `schema_migrations`.
 `002_events.sql` adds events and the public-ID immutability trigger.
 `003_admin_sessions.sql` adds the singleton hashed credential, sessions, and an
-expiry index. A fresh install applies all three. A Gate 1 database automatically
-receives only the new migrations on startup, preserving its original history.
+expiry index. `004_local_uploads.sql` adds upload sessions, assets, the durable
+event-deletion marker, foreign keys, and indexes for real event/status/session/
+cleanup queries. A fresh install applies all four. Gate 1 and Gate 2 databases
+receive only new migrations, preserving existing events, admin sessions, and history.
 Never edit, rename, remove,
 or renumber an applied migration. The runner verifies checksums (ignoring CRLF
 versus LF), rejects history newer than the binary, and applies pending files
@@ -316,14 +449,15 @@ and their history entries atomically in one `BEGIN IMMEDIATE` transaction. A
 rolls back the pending batch and prevents the HTTP server from starting.
 
 Migration SQL must not contain its own transaction control or operations such
-as `VACUUM` that cannot run inside a transaction. There are no media tables or
-storage abstractions in this gate.
+as `VACUUM` that cannot run inside a transaction. Asset rows contain metadata
+only; image bytes are never stored in SQLite.
 
-### Upgrade from Gate 1
+### Upgrade from Gate 1 or Gate 2
 
 Stop the old container and back up `./data` before upgrading. Add the now-required
 `PHOTODROP_ADMIN_PASSWORD` to your environment or `.env`, then run
 `docker compose up --build -d`. Startup verifies the existing migration checksum,
-applies Gate 2, initializes the hashed administrator credential, and starts HTTP.
-There is no automatic downgrade: the Gate 1 binary rejects a newer schema. To
+applies pending migrations through Gate 3, initializes/verifies the administrator
+credential, prepares local upload storage, and starts HTTP. There is no automatic
+downgrade: older binaries reject the newer schema. To
 roll back, stop PhotoDrop and restore the pre-upgrade backup with the old binary.
