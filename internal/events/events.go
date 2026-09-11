@@ -25,6 +25,7 @@ type Event struct {
 	ExpiresAt   *time.Time `json:"expires_at"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
+	Deleting    bool       `json:"deleting"`
 }
 
 // Input deliberately has no internal/public identifier or audit timestamps.
@@ -41,7 +42,7 @@ type ValidationError struct{ Fields map[string]string }
 func (e *ValidationError) Error() string { return "Check the event fields" }
 
 func (e Event) Status(now time.Time) string {
-	if !e.Enabled {
+	if !e.Enabled || e.Deleting {
 		return "disabled"
 	}
 	if e.ExpiresAt != nil && !now.Before(*e.ExpiresAt) {
@@ -103,13 +104,13 @@ type Store struct{ db *sql.DB }
 
 func New(db *sql.DB) *Store { return &Store{db: db} }
 
-const columns = "id, public_id, name, description, event_date, enabled, expires_at, created_at, updated_at"
+const columns = "id, public_id, name, description, event_date, enabled, expires_at, created_at, updated_at, deleting"
 
 func scan(row interface{ Scan(...any) error }) (Event, error) {
 	var e Event
 	var expiry *string
 	var created, updated string
-	if err := row.Scan(&e.ID, &e.PublicID, &e.Name, &e.Description, &e.EventDate, &e.Enabled, &expiry, &created, &updated); err != nil {
+	if err := row.Scan(&e.ID, &e.PublicID, &e.Name, &e.Description, &e.EventDate, &e.Enabled, &expiry, &created, &updated, &e.Deleting); err != nil {
 		return Event{}, err
 	}
 	var err error
@@ -204,7 +205,7 @@ func (s *Store) Update(ctx context.Context, id int64, input Input) (Event, error
 		return Event{}, err
 	}
 	row := s.db.QueryRowContext(ctx, `UPDATE events SET name = ?, description = ?, event_date = ?,
-	    enabled = ?, expires_at = ?, updated_at = ? WHERE id = ? RETURNING `+columns,
+	    enabled = ?, expires_at = ?, updated_at = ? WHERE id = ? AND deleting = 0 RETURNING `+columns,
 		e.Name, e.Description, e.EventDate, e.Enabled, expiryValue(e.ExpiresAt), time.Now().UTC().Format(time.RFC3339Nano), id)
 	e, err = scan(row)
 	if err != nil {

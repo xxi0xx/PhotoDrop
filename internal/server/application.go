@@ -16,16 +16,20 @@ import (
 
 	"photodrop/internal/auth"
 	"photodrop/internal/events"
+	"photodrop/internal/media"
+	"photodrop/internal/storage"
 )
 
 const sessionCookie = "photodrop_session"
 
 type application struct {
-	events  *events.Store
-	auth    *auth.Manager
-	baseURL string
-	index   []byte
-	logger  *slog.Logger
+	events      *events.Store
+	auth        *auth.Manager
+	media       *media.Service
+	maxFileSize int64
+	baseURL     string
+	index       []byte
+	logger      *slog.Logger
 }
 
 func (a *application) routes(mux *http.ServeMux) {
@@ -35,6 +39,8 @@ func (a *application) routes(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /e/{public_id}", a.publicPage)
 	mux.HandleFunc("GET /api/public/events/{public_id}", a.publicEvent)
+	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions", a.createUploadSession)
+	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets", a.uploadAsset)
 	mux.HandleFunc("POST /api/admin/login", a.login)
 	mux.HandleFunc("POST /api/admin/logout", a.protected(a.logout))
 	mux.HandleFunc("GET /api/admin/session", a.protected(func(w http.ResponseWriter, r *http.Request, s auth.Session) { writeJSON(w, 200, s) }))
@@ -46,6 +52,8 @@ func (a *application) routes(mux *http.ServeMux) {
 	for path, methods := range map[string]string{
 		"/api/admin/login": "POST", "/api/admin/logout": "POST", "/api/admin/session": "GET, HEAD",
 		"/api/admin/events": "GET, HEAD, POST", "/api/admin/events/{id}": "GET, HEAD, PUT, DELETE", "/api/public/events/{public_id}": "GET, HEAD",
+		"/api/public/events/{public_id}/upload-sessions":                     "POST",
+		"/api/public/events/{public_id}/upload-sessions/{session_id}/assets": "POST",
 	} {
 		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Allow", methods)
@@ -74,7 +82,26 @@ func apiError(w http.ResponseWriter, status int, code, message string, fields ma
 
 func (a *application) fail(w http.ResponseWriter, err error) {
 	var validation *events.ValidationError
+	var tooLarge *http.MaxBytesError
 	switch {
+	case errors.Is(err, media.ErrClosed):
+		apiError(w, 409, "event_closed", "This event is no longer accepting uploads.", nil)
+	case errors.Is(err, media.ErrSession):
+		apiError(w, 404, "upload_session_not_found", "Upload session not found for this event. Reload the page and try again.", nil)
+	case errors.Is(err, media.ErrFilename):
+		apiError(w, 422, "invalid_filename", "Provide a filename of 1 to 255 valid characters.", nil)
+	case errors.Is(err, media.ErrType):
+		apiError(w, 415, "unsupported_image", "This file does not appear to be a supported image.", nil)
+	case errors.Is(err, media.ErrEmpty):
+		apiError(w, 422, "empty_file", "Empty files cannot be uploaded.", nil)
+	case errors.Is(err, storage.ErrTooLarge), errors.As(err, &tooLarge):
+		apiError(w, 413, "file_too_large", "This file is larger than the upload limit.", nil)
+	case errors.Is(err, media.ErrSize):
+		apiError(w, 400, "size_mismatch", "The complete file was not received. Please try again.", nil)
+	case errors.Is(err, media.ErrBusy):
+		apiError(w, 409, "uploads_active", media.ErrBusy.Error(), nil)
+	case errors.Is(err, media.ErrDeleting):
+		apiError(w, 500, "media_cleanup_failed", media.ErrDeleting.Error(), nil)
 	case errors.Is(err, sql.ErrNoRows):
 		apiError(w, 404, "not_found", "Event not found", nil)
 	case errors.As(err, &validation):
@@ -217,14 +244,15 @@ func (a *application) logout(w http.ResponseWriter, r *http.Request, _ auth.Sess
 
 type adminEvent struct {
 	events.Event
-	Status    string `json:"status"`
-	PublicURL string `json:"public_url"`
+	Status    string      `json:"status"`
+	PublicURL string      `json:"public_url"`
+	Media     media.Stats `json:"media"`
 }
 
 func (a *application) adminEvent(e events.Event) adminEvent {
 	// Validated base URLs have no subpath. With no configured origin, return a
 	// relative URL; never construct absolute public links from Host headers.
-	return adminEvent{e, e.Status(time.Now()), a.baseURL + "/e/" + e.PublicID}
+	return adminEvent{Event: e, Status: e.Status(time.Now()), PublicURL: a.baseURL + "/e/" + e.PublicID}
 }
 
 func (a *application) listEvents(w http.ResponseWriter, r *http.Request, _ auth.Session) {
@@ -234,8 +262,15 @@ func (a *application) listEvents(w http.ResponseWriter, r *http.Request, _ auth.
 		return
 	}
 	result := make([]adminEvent, 0, len(list))
+	stats, err := a.media.Stats(r.Context())
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
 	for _, e := range list {
-		result = append(result, a.adminEvent(e))
+		item := a.adminEvent(e)
+		item.Media = stats[e.ID]
+		result = append(result, item)
 	}
 	writeJSON(w, 200, map[string]any{"events": result})
 }
@@ -254,7 +289,7 @@ func (a *application) getEvent(w http.ResponseWriter, r *http.Request, _ auth.Se
 		a.fail(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"event": a.adminEvent(e)})
+	a.writeAdminEvent(w, r, e)
 }
 
 func (a *application) createEvent(w http.ResponseWriter, r *http.Request, _ auth.Session) {
@@ -283,12 +318,12 @@ func (a *application) updateEvent(w http.ResponseWriter, r *http.Request, _ auth
 		return
 	}
 	a.logger.Info("event updated", "event_id", e.ID)
-	writeJSON(w, 200, map[string]any{"event": a.adminEvent(e)})
+	a.writeAdminEvent(w, r, e)
 }
 
 func (a *application) deleteEvent(w http.ResponseWriter, r *http.Request, _ auth.Session) {
 	id := internalID(r)
-	if err := a.events.Delete(r.Context(), id); err != nil {
+	if err := a.media.DeleteEvent(r.Context(), id); err != nil {
 		a.fail(w, err)
 		return
 	}
@@ -341,12 +376,14 @@ func (a *application) publicEvent(w http.ResponseWriter, r *http.Request) {
 		Status      string  `json:"status"`
 		Description string  `json:"description,omitempty"`
 		EventDate   *string `json:"event_date,omitempty"`
+		MaxFileSize int64   `json:"max_file_size,omitempty"`
 	}
 	guest := guestEvent{Name: e.Name, Status: "closed"}
 	if e.Status(time.Now()) == "open" {
 		guest.Status = "open"
 		guest.Description = e.Description
 		guest.EventDate = e.EventDate
+		guest.MaxFileSize = a.maxFileSize
 	}
 	writeJSON(w, 200, map[string]any{"event": guest})
 }

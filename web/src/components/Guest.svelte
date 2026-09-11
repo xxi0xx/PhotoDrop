@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import Upload from './Upload.svelte';
   import { request, message, APIError, displayDate, type GuestEvent } from '../lib/api';
   let { publicID }: { publicID: string } = $props();
   let event = $state<GuestEvent | null>(null); let loading = $state(true); let missing = $state(false); let error = $state('');
@@ -18,6 +19,6 @@
   {:else if error}<h1>Unable to load this event</h1><p class="error" role="alert">{error}</p><button class="secondary" onclick={load}>Try again</button>
   {:else if event}<p class="eyebrow">You're invited</p><h1>{event.name}</h1>
     {#if event.status === 'closed'}<p class="closed-notice">Photo sharing for this event is currently closed.</p>
-    {:else}{#if event.event_date}<p class="guest-date">{displayDate(event.event_date)}</p>{/if}{#if event.description}<p class="guest-description">{event.description}</p>{/if}<p class="coming-soon">Photo sharing will be available here soon.</p>{/if}
+    {:else}{#if event.event_date}<p class="guest-date">{displayDate(event.event_date)}</p>{/if}{#if event.description}<p class="guest-description">{event.description}</p>{/if}<Upload {publicID} maxFileSize={event.max_file_size!} />{/if}
   {/if}
 </main>

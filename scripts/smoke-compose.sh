@@ -9,6 +9,7 @@ curl --fail --silent --show-error http://localhost:8080/ | grep -q '<title>Photo
 
 # Uses only Node's built-in APIs on the development/CI host, never the runtime.
 node scripts/smoke-events.mjs
+node scripts/smoke-uploads.mjs
 
 container=$(docker compose ps -q photodrop)
 docker compose exec -T photodrop sh -ec '

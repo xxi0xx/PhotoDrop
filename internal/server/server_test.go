@@ -31,7 +31,7 @@ func TestEmbeddedFrontendAndHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	cfg := config.Config{ListenAddr: ":8080", AdminPassword: "server-test-password"}
+	cfg := config.Config{ListenAddr: ":8080", DataDir: t.TempDir(), AdminPassword: "server-test-password"}
 	srv, err := New(t.Context(), cfg, db, assets, testLogger())
 	if err != nil {
 		t.Fatal(err)

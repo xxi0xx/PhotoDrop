@@ -8,6 +8,7 @@ services:
       PHOTODROP_DATA_DIR: /data
       PHOTODROP_BASE_URL: "${PHOTODROP_BASE_URL:-}"
       PHOTODROP_ADMIN_PASSWORD: "${PHOTODROP_ADMIN_PASSWORD:?Set PHOTODROP_ADMIN_PASSWORD to a strong 12-to-72-byte password}"
+      PHOTODROP_MAX_FILE_SIZE: "${PHOTODROP_MAX_FILE_SIZE:-52428800}"
     volumes:
       - ./data:/data
     restart: unless-stopped
