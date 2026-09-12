@@ -12,7 +12,7 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 export class APIError extends Error {
-  constructor(message: string, public status: number, public fields: Record<string, string> = {}) { super(message); }
+  constructor(message: string, public status: number, public fields: Record<string, string> = {}, public code = '') { super(message); }
 }
 // Only the CSRF token is held in memory. Authentication uses the HttpOnly cookie.
 let csrfToken = '';
@@ -24,7 +24,7 @@ export async function request<T>(path: string, method = 'GET', data?: unknown): 
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     if (response.status === 401 && window.location.pathname.startsWith('/admin') && window.location.pathname !== '/admin/login') window.location.assign('/admin/login');
-    throw new APIError(body?.error?.message ?? 'Unable to complete the request. Please try again.', response.status, body?.error?.fields);
+    throw new APIError(body?.error?.message ?? 'Unable to complete the request. Please try again.', response.status, body?.error?.fields, body?.error?.code);
   }
   return response.status === 204 ? undefined as T : response.json();
 }

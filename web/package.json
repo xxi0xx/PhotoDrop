@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
-    "build": "vite build"
+    "build": "vite build",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.3.0",

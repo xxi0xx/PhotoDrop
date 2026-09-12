@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"mime"
 	"net/http"
@@ -38,7 +39,55 @@ func (a *application) createUploadSession(w http.ResponseWriter, r *http.Request
 		a.fail(w, err)
 		return
 	}
-	writeJSON(w, 201, map[string]any{"upload_session": session})
+	writeJSON(w, 201, map[string]any{"upload_session": session, "upload_strategy": a.media.Strategy()})
+}
+
+func (a *application) prepareAsset(w http.ResponseWriter, r *http.Request) {
+	if !a.sameOrigin(w, r) {
+		return
+	}
+	var input media.Preparation
+	if !decodeJSON(w, r, &input, 4096) {
+		return
+	}
+	prepared, err := a.media.Prepare(r.Context(), r.PathValue("public_id"), r.PathValue("session_id"), input, a.maxFileSize)
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	writeJSON(w, 201, prepared)
+}
+func (a *application) authorizeAsset(w http.ResponseWriter, r *http.Request) {
+	if !a.sameOrigin(w, r) {
+		return
+	}
+	var input struct{}
+	if !decodeJSON(w, r, &input, 1024) {
+		return
+	}
+	prepared, err := a.media.Authorize(r.Context(), r.PathValue("public_id"), r.PathValue("session_id"), r.PathValue("asset_id"))
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, prepared)
+}
+func (a *application) completeAsset(w http.ResponseWriter, r *http.Request) {
+	if !a.sameOrigin(w, r) {
+		return
+	}
+	var input struct{}
+	if !decodeJSON(w, r, &input, 1024) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	asset, err := a.media.Complete(ctx, r.PathValue("public_id"), r.PathValue("session_id"), r.PathValue("asset_id"))
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"asset": asset})
 }
 
 func (a *application) uploadAsset(w http.ResponseWriter, r *http.Request) {

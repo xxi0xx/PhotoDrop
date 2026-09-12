@@ -30,6 +30,8 @@ jobs:
           echo "PHOTODROP_ADMIN_PASSWORD=$password" >> "$GITHUB_ENV"
       - name: Check frontend
         run: npm run check --prefix web
+      - name: Test direct-upload recovery
+        run: npm test --prefix web
       - name: Build frontend for embedding
         run: npm run build --prefix web
       - name: Check Go formatting

@@ -13,12 +13,18 @@ import (
 const DefaultMaxFileSize int64 = 50 * 1024 * 1024
 
 type Config struct {
-	ListenAddr    string
-	DataDir       string
-	BaseURL       string
-	AdminPassword string `json:"-"`
-	MaxFileSize   int64
+	ListenAddr      string
+	DataDir         string
+	BaseURL         string
+	AdminPassword   string `json:"-"`
+	MaxFileSize     int64
+	StorageProvider string
+	S3              S3 `json:"-"`
 }
+
+// Formatting configuration must never expose passwords or object-store secrets.
+func (Config) String() string     { return "PhotoDrop configuration (credentials redacted)" }
+func (c Config) GoString() string { return c.String() }
 
 func Load() (Config, error) {
 	return parse(os.LookupEnv)
@@ -71,6 +77,9 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 	}
 	if len(cfg.AdminPassword) < 12 || len(cfg.AdminPassword) > 72 || strings.TrimSpace(cfg.AdminPassword) == "" || strings.ContainsRune(cfg.AdminPassword, '\x00') {
 		return Config{}, fmt.Errorf("PHOTODROP_ADMIN_PASSWORD is required and must contain 12 to 72 bytes; no default administrator password is provided")
+	}
+	if err := cfg.loadStorage(lookup); err != nil {
+		return Config{}, err
 	}
 	return cfg, nil
 }
