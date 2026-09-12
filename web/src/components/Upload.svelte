@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { request, message, formatBytes } from '../lib/api';
+  import { runDirect, type UploadPlan, type Prepared, type DirectAttempt } from '../lib/direct-upload';
 
   let { publicID, maxFileSize }: { publicID: string; maxFileSize: number } = $props();
-  type Item = { file: File; status: 'waiting' | 'uploading' | 'ready' | 'failed'; sent: number; error: string };
+  type Item = { file: File; status: 'waiting' | 'preparing' | 'uploading' | 'verifying' | 'ready' | 'failed'; sent: number; error: string; attempt: DirectAttempt };
   const batchLimit = 100;
   const concurrency = 3;
   let items = $state<Item[]>([]);
@@ -12,6 +13,7 @@
   let attempted = $state(false);
   let input = $state<HTMLInputElement>();
   let sessionID = '';
+  let strategy = 'local';
   let canceled = false;
   const active = new Set<XMLHttpRequest>();
   const totalBytes = $derived(items.reduce((sum, item) => sum + item.file.size, 0));
@@ -25,21 +27,26 @@
     const files = Array.from((event.currentTarget as HTMLInputElement).files ?? []);
     if (!files.length) return;
     if (files.length > batchLimit) { error = `Choose up to ${batchLimit} photos at a time.`; return; }
-    items = files.map(file => ({ file, status: 'waiting', sent: 0, error: '' }));
+    items = files.map(file => ({ file, status: 'waiting', sent: 0, error: '', attempt: { requestID: Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2,'0')).join('') } }));
     sessionID = ''; error = ''; attempted = false;
   }
 
-  function transfer(item: Item): Promise<void> {
+  function transfer(item: Item, plan?: UploadPlan): Promise<void> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       const finish = (cause?: Error) => { active.delete(xhr); cause ? reject(cause) : resolve(); };
-      xhr.open('POST', `/api/public/events/${encodeURIComponent(publicID)}/upload-sessions/${sessionID}/assets`);
+      xhr.open(plan?.method ?? 'POST', plan?.url ?? `/api/public/events/${encodeURIComponent(publicID)}/upload-sessions/${sessionID}/assets`);
       xhr.timeout = 10 * 60 * 1000 + 15000;
-      xhr.setRequestHeader('Content-Type', item.file.type || 'application/octet-stream');
-      const filename = encodeURIComponent(item.file.name).replace(/['()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
-      xhr.setRequestHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+      if (plan) {
+        for (const [name,value] of Object.entries(plan.headers)) xhr.setRequestHeader(name,value);
+      } else {
+        xhr.setRequestHeader('Content-Type', item.file.type || 'application/octet-stream');
+        const filename = encodeURIComponent(item.file.name).replace(/['()*]/g, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+        xhr.setRequestHeader('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+      }
       xhr.upload.onprogress = event => { item.sent = Math.min(event.loaded, item.file.size); };
       xhr.onload = () => {
+        if (plan) { finish(xhr.status >= 200 && xhr.status < 300 ? undefined : new Error('Upload did not finish. Please retry this photo.')); return; }
         let body: { asset?: { status?: string }; error?: { message?: string } } = {};
         try { body = JSON.parse(xhr.responseText); } catch { /* Use a safe generic error. */ }
         if (xhr.status === 201 && body.asset?.status === 'ready') finish();
@@ -62,7 +69,10 @@
     busy = true; canceled = false; attempted = true; error = '';
     for (const item of selected) { item.status = 'waiting'; item.error = ''; item.sent = 0; }
     try {
-      if (!sessionID) sessionID = (await request<{ upload_session: { id: string } }>(`/api/public/events/${encodeURIComponent(publicID)}/upload-sessions`, 'POST', {})).upload_session.id;
+      if (!sessionID) {
+        const session = await request<{ upload_session: { id: string }; upload_strategy: string }>(`/api/public/events/${encodeURIComponent(publicID)}/upload-sessions`, 'POST', {});
+        sessionID = session.upload_session.id; strategy = session.upload_strategy;
+      }
       let next = 0;
       async function worker() {
         while (!canceled && next < selected.length) {
@@ -71,7 +81,16 @@
           try {
             if (!item.file.size) throw new Error('This file is empty.');
             if (item.file.size > maxFileSize) throw new Error(`This file exceeds the ${formatBytes(maxFileSize)} limit.`);
-            await transfer(item);
+            if (strategy === 'direct') {
+              const base = `/api/public/events/${encodeURIComponent(publicID)}/upload-sessions/${sessionID}/assets`;
+              await runDirect(item.attempt, {
+                prepare: () => request<Prepared>(`${base}/prepare`, 'POST', { filename: item.file.name, size: item.file.size, content_type: item.file.type || 'application/octet-stream', request_id: item.attempt.requestID }),
+                authorize: id => request<Prepared>(`${base}/${id}/authorize`, 'POST', {}),
+                complete: id => request(`${base}/${id}/complete`, 'POST', {}),
+                put: plan => { item.sent = 0; return transfer(item,plan); },
+                stage: stage => { item.status = stage; }, canceled: () => canceled,
+              });
+            } else await transfer(item);
             item.status = 'ready'; item.sent = item.file.size;
           } catch (cause) { item.status = 'failed'; item.sent = 0; item.error = message(cause); }
         }
@@ -112,7 +131,7 @@
     <ul class="upload-list" aria-label="Selected photos">
       {#each items as item, i}
         <li>
-          <div class="upload-row"><span class="filename">{item.file.name}</span><span class:upload-success={item.status === 'ready'}>{item.status === 'ready' ? '✓ Uploaded' : item.status === 'failed' ? 'Failed' : item.status === 'waiting' ? 'Waiting' : item.sent >= item.file.size ? 'Finishing…' : `${Math.floor(item.sent / Math.max(item.file.size, 1) * 100)}%`}</span></div>
+          <div class="upload-row"><span class="filename">{item.file.name}</span><span class:upload-success={item.status === 'ready'}>{item.status === 'ready' ? '✓ Uploaded' : item.status === 'failed' ? 'Failed' : item.status === 'waiting' ? 'Waiting' : item.status === 'preparing' ? 'Preparing…' : item.status === 'verifying' ? 'Verifying…' : item.sent >= item.file.size ? 'Finishing…' : `${Math.floor(item.sent / Math.max(item.file.size, 1) * 100)}%`}</span></div>
           <span class="hint">{formatBytes(item.file.size)}</span>
           {#if item.status === 'uploading'}<progress aria-label={`Upload progress for ${item.file.name}`} max={Math.max(item.file.size, 1)} value={item.sent}></progress>{/if}
           {#if item.error}<p class="error" id={`upload-error-${i}`}>{item.error}</p>{/if}

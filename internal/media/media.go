@@ -19,15 +19,31 @@ import (
 )
 
 type Service struct {
-	db      *sql.DB
-	events  *events.Store
-	storage storage.Store
-	logger  *slog.Logger
-	locks   sync.Map // internal event ID -> *sync.RWMutex; only existing events acquire entries
+	db           *sql.DB
+	events       *events.Store
+	storage      storage.Store
+	logger       *slog.Logger
+	locks        sync.Map // internal event ID -> *sync.RWMutex; only existing events acquire entries
+	direct       storage.Direct
+	directActive bool
+	assetLocks   [64]sync.Mutex
 }
 
 func New(db *sql.DB, objects storage.Store, logger *slog.Logger) *Service {
 	return &Service{db: db, events: events.New(db), storage: objects, logger: logger}
+}
+
+// ConfigureDirect is called once during startup. Retain this backend in local
+// mode so historical S3 assets can still be finalized, cleaned, and deleted.
+func (s *Service) ConfigureDirect(objects storage.Direct, active bool) {
+	s.direct = objects
+	s.directActive = active
+}
+func (s *Service) Strategy() string {
+	if s.directActive {
+		return "direct"
+	}
+	return "local"
 }
 
 func randomID() string { var b [16]byte; rand.Read(b[:]); return hex.EncodeToString(b[:]) }
@@ -121,6 +137,9 @@ type Asset struct {
 // media. Event deletion uses the exclusive event lock; concurrent uploads share
 // it. Event edits can happen during transfer and are rechecked before readiness.
 func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, declaredType string, source io.Reader, claimedSize, limit int64) (Asset, error) {
+	if s.directActive {
+		return Asset{}, ErrStrategy
+	}
 	if err := ValidateFilename(filename); err != nil {
 		return Asset{}, err
 	}
@@ -249,14 +268,14 @@ func (s *Service) Stats(ctx context.Context) (map[int64]Stats, error) {
 }
 
 func (s *Service) removeAttempt(ctx context.Context, eventID int64, id, key string) error {
-	if !validID(id) || key != objectKey(eventID, id) {
+	if !validID(id) {
 		return storage.ErrInvalidKey
 	}
 	// A completion commit can report an error with an uncertain outcome. Never
 	// remove a file that SQLite already considers ready. Callers serialize this
 	// check with uploads/deletion; startup cleanup runs before serving requests.
-	var status string
-	err := s.db.QueryRowContext(ctx, "SELECT status FROM assets WHERE id = ? AND event_id = ? AND storage_key = ?", id, eventID, key).Scan(&status)
+	var status, provider, target string
+	err := s.db.QueryRowContext(ctx, "SELECT status, storage_provider, storage_target FROM assets WHERE id = ? AND event_id = ? AND storage_key = ?", id, eventID, key).Scan(&status, &provider, &target)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -266,8 +285,27 @@ func (s *Service) removeAttempt(ctx context.Context, eventID int64, id, key stri
 	if status != "pending" {
 		return errors.New("refusing to clean up a completed asset")
 	}
-	if err := s.storage.Delete(ctx, key); err != nil {
-		return err
+	if provider == "local" {
+		if key != objectKey(eventID, id) {
+			return storage.ErrInvalidKey
+		}
+		if err := s.storage.Delete(ctx, key); err != nil {
+			return err
+		}
+	} else if provider == "s3" {
+		if err := s.checkDirectKey(eventID, id, key, target); err != nil {
+			return err
+		}
+		// Record retirement before DELETE: an old bearer URL may recreate the
+		// object after deletion. Retired keys survive event/session cascades.
+		if _, err := s.db.ExecContext(ctx, "INSERT OR IGNORE INTO s3_cleanup(storage_key, storage_target, event_id, asset_id, checked_at) VALUES (?, ?, ?, ?, ?)", key, target, eventID, id, timestamp()); err != nil {
+			return err
+		}
+		if err := s.direct.Delete(ctx, key); err != nil {
+			return err
+		}
+	} else {
+		return storage.ErrBackend
 	}
 	_, err = s.db.ExecContext(ctx, "DELETE FROM assets WHERE id = ? AND event_id = ? AND status = 'pending'", id, eventID)
 	return err
@@ -276,7 +314,8 @@ func (s *Service) removeAttempt(ctx context.Context, eventID int64, id, key stri
 // Cleanup is bounded and runs only at startup. An hour exceeds the ten-minute
 // upload deadline; recent pending rows remain excluded from completed totals.
 func (s *Service) Cleanup(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, "SELECT event_id, id, storage_key FROM assets WHERE status = 'pending' AND created_at < ? ORDER BY created_at LIMIT 1000", time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano))
+	cutoff := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+	rows, err := s.db.QueryContext(ctx, "SELECT event_id, id, storage_key FROM assets WHERE status = 'pending' AND created_at < ? AND (authorized_until IS NULL OR authorized_until < ?) ORDER BY created_at LIMIT 1000", cutoff, cutoff)
 	if err != nil {
 		return err
 	}
@@ -308,7 +347,7 @@ func (s *Service) Cleanup(ctx context.Context) error {
 			s.logger.Info("stale pending asset removed", "asset_id", p.id)
 		}
 	}
-	return nil
+	return s.cleanupRetired(ctx)
 }
 
 // DeleteEvent rejects active transfers rather than holding a request open for

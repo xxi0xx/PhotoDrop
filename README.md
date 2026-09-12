@@ -1,21 +1,26 @@
 # PhotoDrop
 
-PhotoDrop is a self-hosted event photo collection app. **Gate 3 adds anonymous
-image uploads to local storage:** guests select photos, see per-file and overall
+PhotoDrop is a self-hosted event photo collection app. **Gate 4 supports local
+uploads and S3-compatible direct uploads, including the Cloudflare R2 S3 API:**
+guests select photos, see per-file and overall
 progress, and retry failed files. One administrator manages events and sees
 completed photo counts and storage totals. The Go/Svelte/SQLite foundation,
 authentication, event links, and one-container deployment remain intact.
 
-**S3, Cloudflare R2, direct-to-object-storage uploads, video, resumable multipart
-uploads, Immich, QR generation, public downloads, galleries, thumbnails, exports,
+**Video, multipart/resumable uploads, Immich, QR generation, public downloads, galleries, thumbnails, exports,
 contributor names, Turnstile, and rate limiting are not implemented.**
+
+See [S3/R2 setup and operating semantics](docs/storage.md). Local storage remains
+the default. Live R2 interoperability and browser CORS require validation with
+your private bucket; deterministic S3 tests do not establish a live R2 pass.
 
 ## Architecture
 
 - One Go executable serves HTTP and the compiled Svelte frontend on port 8080.
 - SQLite uses `database/sql` and the CGO-free `modernc.org/sqlite` driver; no ORM.
 - SQL migrations and frontend assets are embedded at build time.
-- SQLite stores metadata; original image bytes live under `/data/uploads`.
+- SQLite stores metadata and each asset's provider. Image bytes live under
+  `/data/uploads` in local mode or in a private S3-compatible bucket in S3 mode.
 - One production container and one `/data` volume; no external database, Redis,
   Node.js runtime, or reverse proxy is required.
 - Structured JSON logs go to stdout. SIGINT/SIGTERM drains HTTP requests for up
@@ -265,7 +270,10 @@ Linux; media is not executable. No media path is served over HTTP.
 
 `internal/media` manages authorization and metadata through a small `Store`
 interface (`Put` and `Delete`). Only `internal/storage.Local` handles filesystem
-operations. There is no cloud implementation or speculative presigning API.
+operations. S3 uses a separate `Direct` capability for authorization, HEAD,
+ranged reads, and deletion; it never receives an image-body reader.
+The API/lifecycle below describes **local mode**. See [direct uploads](docs/storage.md)
+for S3 mode, verification, idempotent retries, and provider switching.
 
 ### Upload API and lifecycle
 
@@ -275,7 +283,7 @@ token**. There is no cross-origin upload API.
 
 | Method | Route | Request / response |
 | --- | --- | --- |
-| POST | `/api/public/events/{public_id}/upload-sessions` | JSON `{}`; returns `{"upload_session":{"id":"..."}}` with HTTP 201 |
+| POST | `/api/public/events/{public_id}/upload-sessions` | JSON `{}`; returns `{"upload_session":{"id":"..."},"upload_strategy":"local"}` with HTTP 201 (`direct` in S3 mode) |
 | POST | `/api/public/events/{public_id}/upload-sessions/{session_id}/assets` | One raw image body; returns guest-safe asset metadata with HTTP 201 |
 
 Each upload session has a random 128-bit ID and belongs to exactly one event.
@@ -314,7 +322,7 @@ header reads remain limited to five seconds. A normal HTTPS reverse proxy needs
 to allow the configured request size/duration; no buffering, special forwarded
 headers, proxy dependency, or extra container is required.
 
-Retries create a new asset attempt and cannot overwrite a completed object.
+Local-mode retries create a new asset attempt and cannot overwrite a completed object.
 Completion state is retained only in the current page session. If the server
 committed a photo but its success response was lost, a retry may create a second
 copy; there is no durable idempotency or content deduplication. Upload session IDs
@@ -407,6 +415,12 @@ appropriate for your deployment.
 | `PHOTODROP_BASE_URL` | unset | Public HTTP(S) origin, e.g. `https://photos.example.com`. Used for guest links, CSRF origin, and HTTPS cookie security. |
 | `PHOTODROP_ADMIN_PASSWORD` | **required; no default** | Single administrator password, 12–72 bytes, not whitespace-only and without NUL. Changing it and restarting revokes sessions. |
 | `PHOTODROP_MAX_FILE_SIZE` | `52428800` | Maximum bytes per image (50 MiB); integer from 1 to 1073741824 (1 GiB). |
+| `PHOTODROP_STORAGE_PROVIDER` | `local` | New-upload strategy: `local` or `s3`. Historical assets retain their provider. |
+
+S3 settings, defaults, and credential handling are documented in [Storage](docs/storage.md#configuration)
+and included in `.env.example`. Local mode needs no S3 credentials.
+See [Gate 4 validation](docs/gate-4-validation.md) for test commands, browser
+data-path evidence, and the explicitly unverified live R2 checks.
 
 Explicitly empty listen/data values are invalid. The optional base URL accepts
 an empty value or a full origin with an optional trailing slash, but no
@@ -425,7 +439,7 @@ internal/database/  SQLite initialization and transactional migrations
 internal/auth/      administrator password and persistent opaque sessions
 internal/events/    validation, random public IDs, and explicit SQLite queries
 internal/media/     upload authorization, asset lifecycle, statistics, cleanup
-internal/storage/   bounded local writes and confined object deletion
+internal/storage/   bounded local writes; AWS SDK S3 authorization/verification
 internal/testutil/  tiny generated image fixtures for tests
 internal/server/    protected APIs/pages, public lookup, health, and shutdown
 migrations/         embedded, numbered SQL files
@@ -439,7 +453,10 @@ scripts/            Compose smoke checks
 `003_admin_sessions.sql` adds the singleton hashed credential, sessions, and an
 expiry index. `004_local_uploads.sql` adds upload sessions, assets, the durable
 event-deletion marker, foreign keys, and indexes for real event/status/session/
-cleanup queries. A fresh install applies all four. Gate 1 and Gate 2 databases
+cleanup queries. `005_s3_storage.sql` adds durable asset provider/target identity,
+expected size/type, authorization expiry, browser request identity, and retired
+S3-key reconciliation records. Gate 3 assets default to `local`; no files move.
+A fresh install applies all five. Gate 1, Gate 2, and Gate 3 databases
 receive only new migrations, preserving existing events, admin sessions, and history.
 Never edit, rename, remove,
 or renumber an applied migration. The runner verifies checksums (ignoring CRLF
@@ -452,12 +469,12 @@ Migration SQL must not contain its own transaction control or operations such
 as `VACUUM` that cannot run inside a transaction. Asset rows contain metadata
 only; image bytes are never stored in SQLite.
 
-### Upgrade from Gate 1 or Gate 2
+### Upgrade from Gate 1, Gate 2, or Gate 3
 
 Stop the old container and back up `./data` before upgrading. Add the now-required
 `PHOTODROP_ADMIN_PASSWORD` to your environment or `.env`, then run
 `docker compose up --build -d`. Startup verifies the existing migration checksum,
-applies pending migrations through Gate 3, initializes/verifies the administrator
+applies pending migrations through Gate 4, initializes/verifies the administrator
 credential, prepares local upload storage, and starts HTTP. There is no automatic
 downgrade: older binaries reject the newer schema. To
 roll back, stop PhotoDrop and restore the pre-upgrade backup with the old binary.

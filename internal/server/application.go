@@ -41,6 +41,9 @@ func (a *application) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/public/events/{public_id}", a.publicEvent)
 	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions", a.createUploadSession)
 	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets", a.uploadAsset)
+	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets/prepare", a.prepareAsset)
+	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets/{asset_id}/authorize", a.authorizeAsset)
+	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets/{asset_id}/complete", a.completeAsset)
 	mux.HandleFunc("POST /api/admin/login", a.login)
 	mux.HandleFunc("POST /api/admin/logout", a.protected(a.logout))
 	mux.HandleFunc("GET /api/admin/session", a.protected(func(w http.ResponseWriter, r *http.Request, s auth.Session) { writeJSON(w, 200, s) }))
@@ -52,8 +55,11 @@ func (a *application) routes(mux *http.ServeMux) {
 	for path, methods := range map[string]string{
 		"/api/admin/login": "POST", "/api/admin/logout": "POST", "/api/admin/session": "GET, HEAD",
 		"/api/admin/events": "GET, HEAD, POST", "/api/admin/events/{id}": "GET, HEAD, PUT, DELETE", "/api/public/events/{public_id}": "GET, HEAD",
-		"/api/public/events/{public_id}/upload-sessions":                     "POST",
-		"/api/public/events/{public_id}/upload-sessions/{session_id}/assets": "POST",
+		"/api/public/events/{public_id}/upload-sessions":                                          "POST",
+		"/api/public/events/{public_id}/upload-sessions/{session_id}/assets":                      "POST",
+		"/api/public/events/{public_id}/upload-sessions/{session_id}/assets/prepare":              "POST",
+		"/api/public/events/{public_id}/upload-sessions/{session_id}/assets/{asset_id}/authorize": "POST",
+		"/api/public/events/{public_id}/upload-sessions/{session_id}/assets/{asset_id}/complete":  "POST",
 	} {
 		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Allow", methods)
@@ -84,6 +90,21 @@ func (a *application) fail(w http.ResponseWriter, err error) {
 	var validation *events.ValidationError
 	var tooLarge *http.MaxBytesError
 	switch {
+	case errors.Is(err, media.ErrStrategy):
+		apiError(w, 409, "upload_strategy", media.ErrStrategy.Error(), nil)
+	case errors.Is(err, media.ErrAsset):
+		apiError(w, 404, "asset_not_found", media.ErrAsset.Error(), nil)
+	case errors.Is(err, media.ErrReady):
+		apiError(w, 409, "asset_ready", media.ErrReady.Error(), nil)
+	case errors.Is(err, media.ErrRequest):
+		apiError(w, 422, "upload_metadata", media.ErrRequest.Error(), nil)
+	case errors.Is(err, storage.ErrMissing):
+		apiError(w, 409, "object_missing", "The upload has not arrived. Please retry this photo.", nil)
+	case errors.Is(err, storage.ErrObjectChanged):
+		apiError(w, 409, "object_changed", "The upload could not be verified. Please retry this photo.", nil)
+	case errors.Is(err, storage.ErrBackend), errors.Is(err, storage.ErrUnavailable):
+		a.logger.Error("object storage operation unavailable", "error", err)
+		apiError(w, 503, "storage_unavailable", "Photo storage is temporarily unavailable. Please try again later.", nil)
 	case errors.Is(err, media.ErrClosed):
 		apiError(w, 409, "event_closed", "This event is no longer accepting uploads.", nil)
 	case errors.Is(err, media.ErrSession):
