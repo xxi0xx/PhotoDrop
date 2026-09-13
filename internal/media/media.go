@@ -19,28 +19,23 @@ import (
 )
 
 type Service struct {
-	db           *sql.DB
-	events       *events.Store
-	storage      storage.Store
-	logger       *slog.Logger
-	locks        sync.Map // internal event ID -> *sync.RWMutex; only existing events acquire entries
-	direct       storage.Direct
-	directActive bool
-	assetLocks   [64]sync.Mutex
+	db         *sql.DB
+	events     *events.Store
+	storage    storage.Store
+	logger     *slog.Logger
+	locks      sync.Map // internal event ID -> *sync.RWMutex; only existing events acquire entries
+	backends   *storage.Backends
+	assetLocks [64]sync.Mutex
 }
 
 func New(db *sql.DB, objects storage.Store, logger *slog.Logger) *Service {
-	return &Service{db: db, events: events.New(db), storage: objects, logger: logger}
+	return &Service{db: db, events: events.New(db), storage: objects, logger: logger, backends: storage.LocalBackends()}
 }
 
-// ConfigureDirect is called once during startup. Retain this backend in local
-// mode so historical S3 assets can still be finalized, cleaned, and deleted.
-func (s *Service) ConfigureDirect(objects storage.Direct, active bool) {
-	s.direct = objects
-	s.directActive = active
-}
+// ConfigureBackends is called once during startup, before cleanup or requests.
+func (s *Service) ConfigureBackends(backends *storage.Backends) { s.backends = backends }
 func (s *Service) Strategy() string {
-	if s.directActive {
+	if s.backends.ActiveID != 1 {
 		return "direct"
 	}
 	return "local"
@@ -137,7 +132,7 @@ type Asset struct {
 // media. Event deletion uses the exclusive event lock; concurrent uploads share
 // it. Event edits can happen during transfer and are rechecked before readiness.
 func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, declaredType string, source io.Reader, claimedSize, limit int64) (Asset, error) {
-	if s.directActive {
+	if s.backends.ActiveID != 1 {
 		return Asset{}, ErrStrategy
 	}
 	if err := ValidateFilename(filename); err != nil {
@@ -176,8 +171,8 @@ func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, dec
 	if !associated {
 		return Asset{}, ErrSession
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO assets(id, event_id, upload_session_id, original_filename, storage_key, status, created_at)
-		VALUES (?, ?, ?, ?, ?, 'pending', ?)`, id, e.ID, sessionID, filename, key, now); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO assets(id, event_id, upload_session_id, original_filename, storage_key, status, created_at, storage_backend_id)
+		VALUES (?, ?, ?, ?, ?, 'pending', ?, 1)`, id, e.ID, sessionID, filename, key, now); err != nil {
 		return Asset{}, fmt.Errorf("create pending asset: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -274,8 +269,9 @@ func (s *Service) removeAttempt(ctx context.Context, eventID int64, id, key stri
 	// A completion commit can report an error with an uncertain outcome. Never
 	// remove a file that SQLite already considers ready. Callers serialize this
 	// check with uploads/deletion; startup cleanup runs before serving requests.
-	var status, provider, target string
-	err := s.db.QueryRowContext(ctx, "SELECT status, storage_provider, storage_target FROM assets WHERE id = ? AND event_id = ? AND storage_key = ?", id, eventID, key).Scan(&status, &provider, &target)
+	var status string
+	var backendID int64
+	err := s.db.QueryRowContext(ctx, "SELECT status, storage_backend_id FROM assets WHERE id = ? AND event_id = ? AND storage_key = ?", id, eventID, key).Scan(&status, &backendID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -285,23 +281,28 @@ func (s *Service) removeAttempt(ctx context.Context, eventID int64, id, key stri
 	if status != "pending" {
 		return errors.New("refusing to clean up a completed asset")
 	}
-	if provider == "local" {
+	backend, err := s.backends.Resolve(backendID)
+	if err != nil {
+		return err
+	}
+	if backend.Type == "local" {
 		if key != objectKey(eventID, id) {
 			return storage.ErrInvalidKey
 		}
 		if err := s.storage.Delete(ctx, key); err != nil {
 			return err
 		}
-	} else if provider == "s3" {
-		if err := s.checkDirectKey(eventID, id, key, target); err != nil {
+	} else if backend.Type == "s3" {
+		direct, err := s.checkDirectKey(eventID, id, key, backendID)
+		if err != nil {
 			return err
 		}
 		// Record retirement before DELETE: an old bearer URL may recreate the
 		// object after deletion. Retired keys survive event/session cascades.
-		if _, err := s.db.ExecContext(ctx, "INSERT OR IGNORE INTO s3_cleanup(storage_key, storage_target, event_id, asset_id, checked_at) VALUES (?, ?, ?, ?, ?)", key, target, eventID, id, timestamp()); err != nil {
+		if _, err := s.db.ExecContext(ctx, "INSERT OR IGNORE INTO s3_cleanup(storage_key, storage_target, event_id, asset_id, checked_at, storage_backend_id) VALUES (?, ?, ?, ?, ?, ?)", key, direct.Target(), eventID, id, timestamp(), backendID); err != nil {
 			return err
 		}
-		if err := s.direct.Delete(ctx, key); err != nil {
+		if err := direct.Delete(ctx, key); err != nil {
 			return err
 		}
 	} else {

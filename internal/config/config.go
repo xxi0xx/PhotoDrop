@@ -13,13 +13,15 @@ import (
 const DefaultMaxFileSize int64 = 50 * 1024 * 1024
 
 type Config struct {
-	ListenAddr      string
-	DataDir         string
-	BaseURL         string
-	AdminPassword   string `json:"-"`
-	MaxFileSize     int64
-	StorageProvider string
-	S3              S3 `json:"-"`
+	ListenAddr        string
+	DataDir           string
+	BaseURL           string
+	AdminPassword     string `json:"-"`
+	MaxFileSize       int64
+	StorageProvider   string
+	StorageBackendKey string
+	S3Backends        map[string]S3 `json:"-"`
+	S3                S3            `json:"-"`
 }
 
 // Formatting configuration must never expose passwords or object-store secrets.

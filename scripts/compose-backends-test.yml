@@ -1,0 +1,63 @@
+# Isolated test stack. Two S3 doubles share a network namespace with PhotoDrop
+# so localhost presigns work from both the real browser and the app container.
+# These test helpers are never part of the production Compose deployment.
+name: photodrop-backends-test
+services:
+  objects:
+    image: photodrop:backends-build
+    build:
+      context: ..
+      target: backend
+    command:
+      - sh
+      - -ec
+      - |
+        go build -o /tmp/s3test ./scripts/s3test
+        /tmp/s3test -listen :18090 -origin http://localhost:8081 -delay 2s &
+        exec /tmp/s3test -listen :18091 -origin http://localhost:8081 -delay 2s
+    ports:
+      - 127.0.0.1:8081:8081
+      - 127.0.0.1:18090:18090
+      - 127.0.0.1:18091:18091
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://localhost:18090/__test/requests && wget -q -O /dev/null http://localhost:18091/__test/requests']
+      interval: 2s
+      timeout: 2s
+      retries: 60
+  photodrop:
+    image: photodrop:backends-test
+    build:
+      context: ..
+    network_mode: service:objects
+    depends_on:
+      objects:
+        condition: service_healthy
+    environment:
+      PHOTODROP_LISTEN_ADDR: :8081
+      PHOTODROP_DATA_DIR: /data
+      PHOTODROP_ADMIN_PASSWORD: temporary-backends-browser-password
+      PHOTODROP_MAX_FILE_SIZE: '1048576'
+      PHOTODROP_STORAGE_PROVIDER: '${PHOTODROP_TEST_PROVIDER:-local}'
+      PHOTODROP_STORAGE_BACKEND_KEY: '${PHOTODROP_TEST_BACKEND_KEY:-}'
+      PHOTODROP_S3_BACKENDS: '${PHOTODROP_TEST_BACKENDS:-s3-a,s3-b}'
+      PHOTODROP_S3_S3_A_BUCKET: photos-a
+      PHOTODROP_S3_S3_A_ENDPOINT: http://localhost:18090
+      PHOTODROP_S3_S3_A_PATH_STYLE: 'true'
+      PHOTODROP_S3_S3_A_PREFIX: a/
+      PHOTODROP_S3_S3_A_ACCESS_KEY_ID: test-s3-access
+      PHOTODROP_S3_S3_A_SECRET_ACCESS_KEY: test-s3-secret-for-local-tests-only
+      PHOTODROP_S3_S3_B_BUCKET: photos-b
+      PHOTODROP_S3_S3_B_ENDPOINT: http://localhost:18091
+      PHOTODROP_S3_S3_B_PATH_STYLE: 'true'
+      PHOTODROP_S3_S3_B_PREFIX: b/
+      PHOTODROP_S3_S3_B_ACCESS_KEY_ID: test-s3-access
+      PHOTODROP_S3_S3_B_SECRET_ACCESS_KEY: test-s3-secret-for-local-tests-only
+    volumes:
+      - backend-data:/data
+    stop_grace_period: 15s
+    healthcheck:
+      interval: 2s
+      timeout: 5s
+      start_period: 2s
+volumes:
+  backend-data:

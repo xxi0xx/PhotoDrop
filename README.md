@@ -13,13 +13,15 @@ contributor names, Turnstile, and rate limiting are not implemented.**
 See [S3/R2 setup and operating semantics](docs/storage.md). Local storage remains
 the default. Live R2 interoperability and browser CORS require validation with
 your private bucket; deterministic S3 tests do not establish a live R2 pass.
+See [durable backend configuration and upgrades](docs/storage-backends.md) and
+the [post-Gate-4 validation report](docs/storage-backends-validation.md).
 
 ## Architecture
 
 - One Go executable serves HTTP and the compiled Svelte frontend on port 8080.
 - SQLite uses `database/sql` and the CGO-free `modernc.org/sqlite` driver; no ORM.
 - SQL migrations and frontend assets are embedded at build time.
-- SQLite stores metadata and each asset's provider. Image bytes live under
+- SQLite stores metadata and each asset's immutable storage backend identity. Image bytes live under
   `/data/uploads` in local mode or in a private S3-compatible bucket in S3 mode.
 - One production container and one `/data` volume; no external database, Redis,
   Node.js runtime, or reverse proxy is required.
@@ -456,7 +458,9 @@ event-deletion marker, foreign keys, and indexes for real event/status/session/
 cleanup queries. `005_s3_storage.sql` adds durable asset provider/target identity,
 expected size/type, authorization expiry, browser request identity, and retired
 S3-key reconciliation records. Gate 3 assets default to `local`; no files move.
-A fresh install applies all five. Gate 1, Gate 2, and Gate 3 databases
+`006_storage_backends.sql` adds immutable named destinations and authoritative
+asset/retired-key backend associations. See [backend upgrade instructions](docs/storage-backends.md).
+A fresh install applies all six. Gate 1, Gate 2, Gate 3, and Gate 4 databases
 receive only new migrations, preserving existing events, admin sessions, and history.
 Never edit, rename, remove,
 or renumber an applied migration. The runner verifies checksums (ignoring CRLF
@@ -469,12 +473,12 @@ Migration SQL must not contain its own transaction control or operations such
 as `VACUUM` that cannot run inside a transaction. Asset rows contain metadata
 only; image bytes are never stored in SQLite.
 
-### Upgrade from Gate 1, Gate 2, or Gate 3
+### Upgrade from Gate 1, Gate 2, Gate 3, or Gate 4
 
 Stop the old container and back up `./data` before upgrading. Add the now-required
 `PHOTODROP_ADMIN_PASSWORD` to your environment or `.env`, then run
 `docker compose up --build -d`. Startup verifies the existing migration checksum,
-applies pending migrations through Gate 4, initializes/verifies the administrator
+applies pending migrations through the storage-backend patch, initializes/verifies the administrator
 credential, prepares local upload storage, and starts HTTP. There is no automatic
 downgrade: older binaries reject the newer schema. To
 roll back, stop PhotoDrop and restore the pre-upgrade backup with the old binary.

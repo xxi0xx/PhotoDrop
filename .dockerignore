@@ -6,4 +6,5 @@ data
 web/node_modules
 web/dist
 .env
+.env.backends
 *.log

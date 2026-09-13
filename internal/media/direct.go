@@ -27,30 +27,36 @@ type Prepared struct {
 }
 type directAsset struct {
 	Asset
-	eventID                   int64
-	key, target, expectedType string
-	expectedSize              int64
-	deleting, enabled         bool
-	expiry                    *string
+	eventID           int64
+	key, expectedType string
+	backendID         int64
+	expectedSize      int64
+	deleting, enabled bool
+	expiry            *string
 }
 
-func (s *Service) checkDirectKey(eventID int64, id, key, target string) error {
-	if s.direct == nil || s.direct.Target() != target {
-		return storage.ErrBackend
+func (s *Service) checkDirectKey(eventID int64, id, key string, backendID int64) (storage.Direct, error) {
+	backend, err := s.backends.Resolve(backendID)
+	if err != nil {
+		return nil, err
 	}
-	if !validID(id) || key != s.direct.Key(eventID, id) {
-		return storage.ErrInvalidKey
+	if backend.Type != "s3" || backend.Direct == nil {
+		return nil, storage.ErrBackend
 	}
-	return nil
+	if !validID(id) || key != backend.Direct.Key(eventID, id) {
+		return nil, storage.ErrInvalidKey
+	}
+	return backend.Direct, nil
 }
 func (s *Service) loadDirect(ctx context.Context, publicID, sessionID, id string) (directAsset, error) {
 	var a directAsset
 	if !validID(id) || !validID(sessionID) {
 		return a, ErrAsset
 	}
-	err := s.db.QueryRowContext(ctx, `SELECT a.id,a.original_filename,a.mime_type,a.size_bytes,a.status,a.event_id,a.storage_key,a.storage_target,a.expected_mime_type,a.expected_size_bytes,e.deleting,e.enabled,e.expires_at
+	err := s.db.QueryRowContext(ctx, `SELECT a.id,a.original_filename,a.mime_type,a.size_bytes,a.status,a.event_id,a.storage_key,a.storage_backend_id,a.expected_mime_type,a.expected_size_bytes,e.deleting,e.enabled,e.expires_at
  FROM assets a JOIN events e ON e.id=a.event_id JOIN upload_sessions u ON u.id=a.upload_session_id AND u.event_id=e.id
- WHERE e.public_id=? AND u.id=? AND a.id=? AND a.storage_provider='s3'`, publicID, sessionID, id).Scan(&a.ID, &a.Filename, &a.MIMEType, &a.Size, &a.Status, &a.eventID, &a.key, &a.target, &a.expectedType, &a.expectedSize, &a.deleting, &a.enabled, &a.expiry)
+ JOIN storage_backends b ON b.id=a.storage_backend_id
+ WHERE e.public_id=? AND u.id=? AND a.id=? AND b.type='s3'`, publicID, sessionID, id).Scan(&a.ID, &a.Filename, &a.MIMEType, &a.Size, &a.Status, &a.eventID, &a.key, &a.backendID, &a.expectedType, &a.expectedSize, &a.deleting, &a.enabled, &a.expiry)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrAsset
 	}
@@ -58,9 +64,14 @@ func (s *Service) loadDirect(ctx context.Context, publicID, sessionID, id string
 }
 
 func (s *Service) Prepare(ctx context.Context, publicID, sessionID string, p Preparation, limit int64) (Prepared, error) {
-	if !s.directActive || s.direct == nil {
+	if s.backends.ActiveID == 1 {
 		return Prepared{}, ErrStrategy
 	}
+	active, err := s.backends.Resolve(s.backends.ActiveID)
+	if err != nil {
+		return Prepared{}, err
+	}
+	direct := active.Direct
 	if err := ValidateFilename(p.Filename); err != nil {
 		return Prepared{}, err
 	}
@@ -119,8 +130,8 @@ func (s *Service) Prepare(ctx context.Context, publicID, sessionID string, p Pre
 			return "", err
 		}
 		id = randomID()
-		_, err = tx.ExecContext(ctx, `INSERT INTO assets(id,event_id,upload_session_id,original_filename,storage_key,status,created_at,storage_provider,storage_target,expected_size_bytes,expected_mime_type,client_request_id)
-   VALUES(?,?,?,?,?,'pending',?,'s3',?,?,?,?)`, id, e.ID, sessionID, p.Filename, s.direct.Key(e.ID, id), timestamp(), s.direct.Target(), p.Size, p.ContentType, p.RequestID)
+		_, err = tx.ExecContext(ctx, `INSERT INTO assets(id,event_id,upload_session_id,original_filename,storage_key,status,created_at,storage_provider,storage_target,expected_size_bytes,expected_mime_type,client_request_id,storage_backend_id)
+   VALUES(?,?,?,?,?,'pending',?,'s3',?,?,?,?,?)`, id, e.ID, sessionID, p.Filename, direct.Key(e.ID, id), timestamp(), direct.Target(), p.Size, p.ContentType, p.RequestID, active.ID)
 		if err != nil {
 			return "", err
 		}
@@ -166,10 +177,11 @@ func (s *Service) Authorize(ctx context.Context, publicID, sessionID, id string)
 	if _, err := s.openEvent(ctx, publicID); err != nil {
 		return Prepared{}, err
 	}
-	if err := s.checkDirectKey(a.eventID, id, a.key, a.target); err != nil {
+	direct, err := s.checkDirectKey(a.eventID, id, a.key, a.backendID)
+	if err != nil {
 		return Prepared{}, err
 	}
-	plan, err := s.direct.Authorize(ctx, a.key, a.expectedType)
+	plan, err := direct.Authorize(ctx, a.key, a.expectedType)
 	if err != nil {
 		return Prepared{}, err
 	}
@@ -209,16 +221,17 @@ func (s *Service) Complete(ctx context.Context, publicID, sessionID, id string) 
 	if a.Status == "ready" {
 		return a.Asset, nil
 	}
-	if err := s.checkDirectKey(a.eventID, id, a.key, a.target); err != nil {
+	direct, err := s.checkDirectKey(a.eventID, id, a.key, a.backendID)
+	if err != nil {
 		return Asset{}, err
 	}
 	s.logger.Info("direct upload verification started", "asset_id", id)
-	info, err := s.direct.Head(ctx, a.key)
+	info, err := direct.Head(ctx, a.key)
 	if err != nil {
 		return Asset{}, err
 	}
 	reject := func(cause error) (Asset, error) {
-		if err := s.direct.Delete(ctx, a.key); err != nil {
+		if err := direct.Delete(ctx, a.key); err != nil {
 			s.logger.Error("invalid object cleanup failed", "asset_id", id, "error", err)
 			return Asset{}, err
 		}
@@ -235,7 +248,7 @@ func (s *Service) Complete(ctx context.Context, publicID, sessionID, id string) 
 			return reject(ErrType)
 		}
 	}
-	prefix, err := s.direct.ReadPrefix(ctx, a.key, info)
+	prefix, err := direct.ReadPrefix(ctx, a.key, info)
 	if err != nil {
 		return Asset{}, err
 	}
@@ -280,18 +293,19 @@ func (s *Service) Complete(ctx context.Context, publicID, sessionID, id string) 
 }
 
 func (s *Service) cleanupRetired(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, "SELECT storage_key,storage_target,event_id,asset_id FROM s3_cleanup WHERE checked_at < ? ORDER BY checked_at LIMIT 1000", time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano))
+	rows, err := s.db.QueryContext(ctx, "SELECT storage_key,storage_backend_id,event_id,asset_id FROM s3_cleanup WHERE checked_at < ? ORDER BY checked_at LIMIT 1000", time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}
 	type retired struct {
-		key, target, id string
-		eventID         int64
+		key, id   string
+		backendID int64
+		eventID   int64
 	}
 	var items []retired
 	for rows.Next() {
 		var r retired
-		if err := rows.Scan(&r.key, &r.target, &r.eventID, &r.id); err != nil {
+		if err := rows.Scan(&r.key, &r.backendID, &r.eventID, &r.id); err != nil {
 			rows.Close()
 			return err
 		}
@@ -303,9 +317,9 @@ func (s *Service) cleanupRetired(ctx context.Context) error {
 		return err
 	}
 	for _, r := range items {
-		err := s.checkDirectKey(r.eventID, r.id, r.key, r.target)
+		direct, err := s.checkDirectKey(r.eventID, r.id, r.key, r.backendID)
 		if err == nil {
-			err = s.direct.Delete(ctx, r.key)
+			err = direct.Delete(ctx, r.key)
 		}
 		if err != nil {
 			s.logger.Error("retired object cleanup failed", "asset_id", r.id, "error", err)

@@ -46,7 +46,7 @@ func NormalizePrefix(value string) (string, error) {
 	return value + "/", nil
 }
 
-func (c *Config) loadStorage(lookup func(string) (string, bool)) error {
+func (c *Config) loadStorageSingle(lookup func(string) (string, bool)) error {
 	c.StorageProvider = "local"
 	if v, ok := lookup("PHOTODROP_STORAGE_PROVIDER"); ok {
 		c.StorageProvider = v

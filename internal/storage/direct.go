@@ -10,7 +10,7 @@ import (
 var ErrUnavailable = errors.New("object storage is unavailable; retry later")
 var ErrMissing = errors.New("uploaded object was not found")
 var ErrObjectChanged = errors.New("uploaded object changed during verification")
-var ErrBackend = errors.New("the original S3 configuration is required to manage this asset")
+var ErrBackend = errors.New("storage backend unavailable")
 
 type UploadPlan struct {
 	Strategy  string            `json:"strategy"`

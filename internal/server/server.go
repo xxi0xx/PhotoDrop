@@ -35,17 +35,18 @@ func New(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS, logge
 		return nil, err
 	}
 	uploads := media.New(db, objects, logger)
+	backends, err := storage.Reconcile(ctx, db, cfg, logger)
+	if err != nil {
+		return nil, err
+	}
+	uploads.ConfigureBackends(backends)
 	connectSrc := "'self'"
-	if cfg.S3.Configured() {
-		direct := storage.NewS3(cfg.S3)
-		origin, err := direct.UploadOrigin(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("configure direct uploads: %w", err)
-		}
+	origins, err := backends.Origins(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("configure direct uploads: %w", err)
+	}
+	for _, origin := range origins {
 		connectSrc += " " + origin
-		uploads.ConfigureDirect(direct, cfg.StorageProvider == "s3")
-	} else if cfg.StorageProvider == "s3" {
-		return nil, storage.ErrBackend
 	}
 	// Remote cleanup is best effort within a small startup budget. A temporary
 	// S3 outage must not take admin pages or the process health check offline.

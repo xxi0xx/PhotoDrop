@@ -22,7 +22,7 @@ func TestStorageConfig(t *testing.T) {
 	if err != nil || c.StorageProvider != "local" || c.S3.Configured() {
 		t.Fatal("local default requires S3", err)
 	}
-	good := map[string]string{"PHOTODROP_STORAGE_PROVIDER": "s3", "PHOTODROP_S3_BUCKET": "photodrop", "PHOTODROP_S3_ACCESS_KEY_ID": "private-key-id", "PHOTODROP_S3_SECRET_ACCESS_KEY": "private-secret-value"}
+	good := map[string]string{"PHOTODROP_STORAGE_BACKEND_KEY": "primary-r2", "PHOTODROP_STORAGE_PROVIDER": "s3", "PHOTODROP_S3_BUCKET": "photodrop", "PHOTODROP_S3_ACCESS_KEY_ID": "private-key-id", "PHOTODROP_S3_SECRET_ACCESS_KEY": "private-secret-value"}
 	c, err = storageConfig(good)
 	if err != nil || c.S3.Region != "auto" || c.S3.PresignTTL != 10*time.Minute {
 		t.Fatal(err)
