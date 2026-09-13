@@ -21,6 +21,29 @@ import (
 	"photodrop/internal/testutil/s3test"
 )
 
+// Rebuild the runtime registry to model a process restart; production never
+// changes its active backend or credential map while serving requests.
+func configureDirect(t *testing.T, s *Service, remote *storage.S3, active bool) {
+	t.Helper()
+	cfg := config.Config{StorageProvider: "local", S3Backends: map[string]config.S3{}}
+	if remote != nil {
+		origin, err := remote.UploadOrigin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.S3Backends["test-store"] = config.S3{Bucket: "photos", Endpoint: origin, Region: s3test.Region, AccessKeyID: s3test.AccessKey, SecretAccessKey: s3test.SecretKey, PathStyle: true, Prefix: "test/", PresignTTL: time.Minute}
+	}
+	if active {
+		cfg.StorageProvider = "s3"
+		cfg.StorageBackendKey = "test-store"
+	}
+	backends, err := storage.Reconcile(t.Context(), s.db, cfg, s.logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.ConfigureBackends(backends)
+}
+
 func directFixture(t *testing.T) (*Service, string, events.Event, Session, *s3test.Server, *storage.S3) {
 	t.Helper()
 	s, dir, e, session := fixture(t)
@@ -28,7 +51,7 @@ func directFixture(t *testing.T) (*Service, string, events.Event, Session, *s3te
 	server := httptest.NewServer(fake)
 	t.Cleanup(server.Close)
 	remote := storage.NewS3(config.S3{Bucket: "photos", Endpoint: server.URL, Region: s3test.Region, AccessKeyID: s3test.AccessKey, SecretAccessKey: s3test.SecretKey, PathStyle: true, Prefix: "test/", PresignTTL: time.Minute})
-	s.ConfigureDirect(remote, true)
+	configureDirect(t, s, remote, true)
 	return s, dir, e, session, fake, remote
 }
 func prepare(t *testing.T, s *Service, e events.Event, session Session, kind string, data []byte) Prepared {
@@ -240,9 +263,9 @@ func TestDirectFailedVerificationAndLostResponses(t *testing.T) {
 func TestMixedProviderDeletionAndRetiredReplay(t *testing.T) {
 	s, dir, e, session, fake, remote := directFixture(t)
 	data := testutil.Images()["image/png"]
-	s.ConfigureDirect(remote, false)
+	configureDirect(t, s, remote, false)
 	local := upload(t, s, e, session, "same.png")
-	s.ConfigureDirect(remote, true)
+	configureDirect(t, s, remote, true)
 	p := prepare(t, s, e, session, "image/png", data)
 	put(t, p, data)
 	finish(t, s, e, session, p)
@@ -252,7 +275,7 @@ func TestMixedProviderDeletionAndRetiredReplay(t *testing.T) {
 	put(t, keep, data)
 	finish(t, s, other, otherSession, keep)
 	fake.Seed("/photos/unrelated", data, "image/png")
-	s.ConfigureDirect(remote, false) // Active local mode still deletes historical S3.
+	configureDirect(t, s, remote, false) // Active local mode still deletes historical S3.
 	fake.Fault("DELETE", 503)
 	if err := s.DeleteEvent(t.Context(), e.ID); !errors.Is(err, ErrDeleting) {
 		t.Fatal("partial deletion was not retained", err)
@@ -307,12 +330,12 @@ func TestDirectStaleCleanupAndBackendIdentity(t *testing.T) {
 	if countAssets(t, s, "pending") != 1 || countAssets(t, s, "ready") != 1 || len(fake.Objects()) != 2 {
 		t.Fatal("stale cleanup affected fresh/ready assets")
 	}
-	s.ConfigureDirect(nil, false)
+	configureDirect(t, s, nil, false)
 	if err := s.DeleteEvent(t.Context(), e.ID); !errors.Is(err, ErrDeleting) {
 		t.Fatal("missing historical backend reported deletion", err)
 	}
-	s.ConfigureDirect(remote, false)
-	if _, err := s.db.Exec("UPDATE assets SET storage_target='wrong-bucket' WHERE id=?", ready.Asset.ID); err != nil {
+	configureDirect(t, s, remote, false)
+	if _, err := s.db.Exec("UPDATE assets SET storage_key='wrong-prefix' WHERE id=?", ready.Asset.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.DeleteEvent(t.Context(), e.ID); !errors.Is(err, ErrDeleting) {

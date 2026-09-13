@@ -51,9 +51,13 @@ jobs:
         run: CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o bin/photodrop ./cmd/photodrop
       - name: Validate Compose deployment, persistence, and shutdown
         run: sh scripts/smoke-compose.sh
+      - name: Validate historical storage backends in isolated Compose
+        run: node scripts/smoke-backends.mjs
       - name: Container logs
         if: always()
         run: docker compose logs --no-color
       - name: Stop containers
         if: always()
-        run: docker compose down
+        run: |
+          docker compose down
+          docker compose -f scripts/compose-backends-test.yml down

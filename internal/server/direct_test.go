@@ -42,6 +42,8 @@ func TestDirectUploadHTTPDataPathAndIsolation(t *testing.T) {
 	remote := httptest.NewServer(objects)
 	defer remote.Close()
 	cfg := config.Config{DataDir: dir, AdminPassword: "s3-test-admin-password", MaxFileSize: 256 * 1024, StorageProvider: "s3", S3: config.S3{Bucket: "photos", Region: s3test.Region, Endpoint: remote.URL, AccessKeyID: s3test.AccessKey, SecretAccessKey: s3test.SecretKey, PathStyle: true, Prefix: "test/", PresignTTL: time.Minute}}
+	cfg.StorageBackendKey = "test-store"
+	cfg.S3Backends = map[string]config.S3{"test-store": cfg.S3}
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	assets, _ := web.Assets()
@@ -162,5 +164,23 @@ func TestDirectUploadHTTPDataPathAndIsolation(t *testing.T) {
 		if strings.Contains(logs.String(), secret) {
 			t.Fatal("normal logs leaked object-store authorization")
 		}
+	}
+	// Historical metadata without credentials must not take browsing/health down.
+	cfg.StorageProvider = "local"
+	cfg.S3Backends = nil
+	restarted, err := New(t.Context(), cfg, db, assets, logger)
+	if err != nil {
+		t.Fatal("missing historical credentials blocked startup", err)
+	}
+	health := httptest.NewRecorder()
+	restarted.Handler.ServeHTTP(health, httptest.NewRequest("GET", "http://localhost:8080/healthz", nil))
+	if health.Code != 200 {
+		t.Fatal("missing historical credentials broke health")
+	}
+	changed := cfg.S3
+	changed.Bucket = "wrong-bucket"
+	cfg.S3Backends = map[string]config.S3{"test-store": changed}
+	if _, err := New(t.Context(), cfg, db, assets, logger); err == nil || !strings.Contains(err.Error(), "choose a new") {
+		t.Fatal("startup allowed destination substitution", err)
 	}
 }

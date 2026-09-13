@@ -1,0 +1,6 @@
+# Optional named-backend configuration; normal local Compose needs no extra file.
+# docker compose -f compose.yml -f compose.backends.yml up --build -d
+services:
+  photodrop:
+    env_file:
+      - .env.backends

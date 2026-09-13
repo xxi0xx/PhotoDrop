@@ -44,7 +44,8 @@ func NewS3(cfg config.S3) *S3 {
 			o.BaseEndpoint = aws.String(cfg.Endpoint)
 		}
 	})
-	// Refuse to dispatch historical keys into a newly configured bucket/prefix.
+	// Preserve Gate 4's fingerprint for legacy association and compatibility
+	// metadata. Runtime routing is authoritative through storage_backend_id.
 	digest := sha256.Sum256([]byte(cfg.Endpoint + "\n" + cfg.Region + "\n" + cfg.Bucket + "\n" + cfg.Prefix))
 	return &S3{client: client, presign: s3.NewPresignClient(client), cfg: cfg, target: hex.EncodeToString(digest[:])}
 }

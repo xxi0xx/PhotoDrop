@@ -14,6 +14,8 @@ for SQLite and any historical local files. No SDK is added to the browser.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PHOTODROP_STORAGE_PROVIDER` | `local` | `local` or `s3`; affects new uploads only. |
+| `PHOTODROP_STORAGE_BACKEND_KEY` | `local-default` in local mode | Stable S3 destination name, required for the single-S3 syntax and active S3 selection. Never reuse a key for a different destination. |
+| `PHOTODROP_S3_BACKENDS` | empty | Optional comma-separated named runtime backends; see [backend configuration](storage-backends.md). |
 | `PHOTODROP_S3_BUCKET` | empty | Private bucket; required for a configured S3 backend. |
 | `PHOTODROP_S3_REGION` | `auto` | Use `auto` for R2; the actual AWS region for AWS S3. |
 | `PHOTODROP_S3_ENDPOINT` | empty | Optional HTTP(S) origin. Empty uses the SDK's AWS endpoint resolution. Use HTTPS outside local development. No credentials, path, query, or fragment. |
@@ -63,6 +65,7 @@ needed. PhotoDrop does not create buckets or edit their access/CORS policies.
 
 ```dotenv
 PHOTODROP_STORAGE_PROVIDER=s3
+PHOTODROP_STORAGE_BACKEND_KEY=primary-r2
 PHOTODROP_BASE_URL=https://photos.example.com
 PHOTODROP_S3_BUCKET=photodrop
 PHOTODROP_S3_REGION=auto
@@ -176,7 +179,7 @@ refreshed pending assets and all ready assets are excluded. Cleanup deletes only
 recorded, validated keys; missing objects count as clean, provider errors retain
 metadata. No bucket listing or background job is used.
 
-Event deletion dispatches using each asset's stored provider. It removes media
+Event deletion dispatches using each asset's durable backend record. It removes media
 before removing the corresponding metadata; partial failures keep the event
 closed and retryable, matching Gate 3. Each retired S3 key is first recorded in
 `s3_cleanup`, independently of event cascades. Because old URLs or uploads already
@@ -186,15 +189,13 @@ are never reused, and rechecking cannot delete a newer asset. **Late objects may
 remain until a later restart; there is no periodic reconciliation.** Retired-key
 metadata grows with S3 deletions; this is a deliberate recovery tradeoff.
 
-Switching `local` ↔ `s3` affects new assets only. Keep the same S3 settings and
-credentials configured when returning to local mode so historical S3 assets
-remain manageable. No files are copied and no old keys/providers are rewritten.
-Each S3 asset stores a non-secret fingerprint of endpoint, region, bucket, and
-prefix. Changing those settings refuses historical operations safely; restore
-the original target configuration to manage them. Credential rotation for the
-same target is allowed. Multiple historical S3 targets and storage migration
-are outside this gate. With missing historical credentials, pages/counts still
-work, but deletion remains incomplete until credentials are restored.
+Switching `local` ↔ S3-A ↔ S3-B affects new assets only. Each asset and retired
+key points to an immutable `storage_backends` record. Supply runtime credentials
+for every historical backend that still needs operations. Reusing a key with
+different addressing metadata fails startup; select a new key instead. No media
+is copied. With missing historical credentials, pages/counts/health still work,
+but deletion remains incomplete until credentials are restored. See [durable
+backend identity and Gate 4 upgrade instructions](storage-backends.md).
 
 Use one PhotoDrop instance per data directory. Keep backups of `/data`, and use
 your provider's backup/versioning policy for remote media; a SQLite backup alone
