@@ -1,14 +1,19 @@
 # PhotoDrop
 
-PhotoDrop is a self-hosted event photo collection app. **Gate 4 supports local
-uploads and S3-compatible direct uploads, including the Cloudflare R2 S3 API:**
+PhotoDrop is a self-hosted event photo collection app. **Gate 5 adds optional
+Turnstile, temporary upload grants, atomic quotas, and abuse controls to local
+and S3-compatible direct uploads, including the Cloudflare R2 S3 API:**
 guests select photos, see per-file and overall
 progress, and retry failed files. One administrator manages events and sees
 completed photo counts and storage totals. The Go/Svelte/SQLite foundation,
 authentication, event links, and one-container deployment remain intact.
 
 **Video, multipart/resumable uploads, Immich, QR generation, public downloads, galleries, thumbnails, exports,
-contributor names, Turnstile, and rate limiting are not implemented.**
+contributor names, and Gate 6 integrations are not implemented.**
+
+See [security configuration and operating limits](docs/security.md) before sharing
+an event publicly, and the [Gate 5 validation report](docs/gate-5-validation.md).
+Quotas are optional; set an event's photo and storage limits for a resource ceiling.
 
 See [S3/R2 setup and operating semantics](docs/storage.md). Local storage remains
 the default. Live R2 interoperability and browser CORS require validation with
@@ -328,22 +333,24 @@ Local-mode retries create a new asset attempt and cannot overwrite a completed o
 Completion state is retained only in the current page session. If the server
 committed a photo but its success response was lost, a retry may create a second
 copy; there is no durable idempotency or content deduplication. Upload session IDs
-are grouping capabilities, not guest identities or permanent resumability.
+are temporary bounded upload grants, not guest identities or permanent resumability.
 
-### Restart cleanup and event deletion
+### Cleanup and event deletion
 
 Completed files and metadata survive restart. At startup, PhotoDrop attempts
 cleanup of at most **1,000 pending assets older than one hour**, including both
 `.part` and already-renamed files. Recent pending rows remain incomplete and
-never count as uploaded photos; another restart after they age retries cleanup.
-Cleanup failures are logged and retain their metadata. There is no periodic
-worker or unbounded full-filesystem scan. Normal shutdown drains for ten seconds;
+never count as uploaded photos, but reserve quota capacity. A bounded internal
+maintenance loop retries cleanup every five minutes with a five-second budget.
+Cleanup failures are logged and retain their metadata. There is no separate
+worker service or unbounded full-filesystem scan. Normal shutdown drains for ten seconds;
 transfers that outlast shutdown can be interrupted and recovered by this policy.
 Run **one PhotoDrop instance per data directory**; event transfer/deletion locks
 are local to that process, and sharing storage between live instances is unsupported.
 
 Admin event responses contain `media.photo_count` and `media.storage_bytes`,
-calculated in SQLite from **ready assets only**. Refresh the event list or reload
+calculated in SQLite from **ready assets only**, plus separate pending count and
+reserved-byte fields when nonzero. Both contribute to quotas. Refresh the event list or reload
 the editor to see new uploads. There is no individual-photo browsing/deletion UI.
 
 Deleting an event now permanently removes its photos and upload metadata. If
@@ -460,7 +467,9 @@ expected size/type, authorization expiry, browser request identity, and retired
 S3-key reconciliation records. Gate 3 assets default to `local`; no files move.
 `006_storage_backends.sql` adds immutable named destinations and authoritative
 asset/retired-key backend associations. See [backend upgrade instructions](docs/storage-backends.md).
-A fresh install applies all six. Gate 1, Gate 2, Gate 3, and Gate 4 databases
+`007_security_abuse.sql` adds event quotas, expiring upload grants, per-session
+bounds, and verification timestamps. Legacy grants expire without deleting ready assets.
+A fresh install applies all seven. Gate 1, Gate 2, Gate 3, and Gate 4 databases
 receive only new migrations, preserving existing events, admin sessions, and history.
 Never edit, rename, remove,
 or renumber an applied migration. The runner verifies checksums (ignoring CRLF
@@ -478,7 +487,7 @@ only; image bytes are never stored in SQLite.
 Stop the old container and back up `./data` before upgrading. Add the now-required
 `PHOTODROP_ADMIN_PASSWORD` to your environment or `.env`, then run
 `docker compose up --build -d`. Startup verifies the existing migration checksum,
-applies pending migrations through the storage-backend patch, initializes/verifies the administrator
+applies pending migrations through Gate 5, initializes/verifies the administrator
 credential, prepares local upload storage, and starts HTTP. There is no automatic
 downgrade: older binaries reject the newer schema. To
 roll back, stop PhotoDrop and restore the pre-upgrade backup with the old binary.

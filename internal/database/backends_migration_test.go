@@ -102,7 +102,7 @@ func TestGate4BackendUpgrade(t *testing.T) {
 			}
 			var after string
 			db.QueryRow("SELECT group_concat(checksum || applied_at,',') FROM (SELECT checksum,applied_at FROM schema_migrations WHERE version<=5 ORDER BY version)").Scan(&after)
-			if before != after || migrationCount(t, db) != 6 {
+			if before != after || migrationCount(t, db) != 7 {
 				t.Fatal("changed old migration history")
 			}
 			db.Close()

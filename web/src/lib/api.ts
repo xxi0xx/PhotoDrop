@@ -3,12 +3,15 @@ export type EventRecord = {
   id: number; public_id: string; name: string; description: string;
   event_date: string | null; enabled: boolean; expires_at: string | null;
   created_at: string; updated_at: string; status: 'open' | 'disabled' | 'expired'; public_url: string;
-  deleting: boolean; media: { photo_count: number; storage_bytes: number };
+  deleting: boolean; max_assets: number | null; max_bytes: number | null;
+  media: { photo_count: number; storage_bytes: number; pending_count?: number; reserved_bytes?: number };
 };
-export type GuestEvent = { name: string; status: 'open' | 'closed'; description?: string; event_date?: string; max_file_size?: number };
+export type Challenge = { site_key: string; action: string };
+export type GuestEvent = { name: string; status: 'open' | 'closed'; description?: string; event_date?: string; max_file_size?: number; challenge?: Challenge };
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 export class APIError extends Error {

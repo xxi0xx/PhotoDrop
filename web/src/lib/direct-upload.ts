@@ -1,6 +1,19 @@
 export type UploadPlan = { strategy: 'direct'; method: 'PUT'; url: string; headers: Record<string,string>; expires_at: string };
 export type Prepared = { asset: { id: string; status: string }; upload: UploadPlan };
 export type DirectAttempt = { requestID: string; assetID?: string };
+type GrantedAttempt = { attempt: DirectAttempt; grant?: { id: string } };
+
+// Only an authoritative missing grant/attempt or denied new authorization lets
+// the UI forget an ID. A failed verification may still have committed remotely.
+export function recoverUploadGrant(item: GrantedAttempt, error: unknown, stage: string): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error) || !('status' in error)) return false;
+  const removed = error.status === 404 && ['upload_session_not_found', 'asset_not_found'].includes(String(error.code));
+  const exhausted = stage !== 'verifying' && error.status === 409 && ['session_expired', 'session_quota'].includes(String(error.code));
+  if (!removed && !exhausted) return false;
+  item.grant = undefined;
+  item.attempt = { requestID: item.attempt.requestID };
+  return true;
+}
 export type DirectOps = {
   prepare(): Promise<Prepared>;
   authorize(id: string): Promise<Prepared>;

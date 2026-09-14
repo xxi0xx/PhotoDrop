@@ -22,6 +22,7 @@ type Config struct {
 	StorageBackendKey string
 	S3Backends        map[string]S3 `json:"-"`
 	S3                S3            `json:"-"`
+	Security          Security
 }
 
 // Formatting configuration must never expose passwords or object-store secrets.
@@ -81,6 +82,9 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, fmt.Errorf("PHOTODROP_ADMIN_PASSWORD is required and must contain 12 to 72 bytes; no default administrator password is provided")
 	}
 	if err := cfg.loadStorage(lookup); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.loadSecurity(lookup); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil

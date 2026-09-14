@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"photodrop/internal/abuse"
 	"photodrop/internal/auth"
 	"photodrop/internal/config"
 	"photodrop/internal/events"
@@ -22,6 +23,13 @@ import (
 )
 
 func New(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS, logger *slog.Logger) (*http.Server, error) {
+	return newServer(ctx, cfg, db, assets, logger, nil)
+}
+
+// The verifier seam is package-private for deterministic tests; production has
+// no environment setting, header, or query parameter selecting a fake verifier.
+func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS, logger *slog.Logger, verifier abuse.Verifier) (*http.Server, error) {
+	cfg.Security = cfg.Security.Defaults()
 	index, err := fs.ReadFile(assets, "index.html")
 	if err != nil {
 		return nil, fmt.Errorf("read embedded frontend (run npm ci and npm run build in web/ before building Go): %w", err)
@@ -40,6 +48,7 @@ func New(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS, logge
 		return nil, err
 	}
 	uploads.ConfigureBackends(backends)
+	uploads.ConfigureSecurity(cfg.Security)
 	connectSrc := "'self'"
 	origins, err := backends.Origins(ctx)
 	if err != nil {
@@ -63,7 +72,13 @@ func New(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS, logge
 	if cfg.MaxFileSize == 0 {
 		cfg.MaxFileSize = config.DefaultMaxFileSize
 	}
-	app := &application{events: events.New(db), auth: admin, media: uploads, maxFileSize: cfg.MaxFileSize, baseURL: cfg.BaseURL, index: index, logger: logger}
+	app := &application{events: events.New(db), auth: admin, media: uploads, maxFileSize: cfg.MaxFileSize, baseURL: cfg.BaseURL, index: index, logger: logger, security: cfg.Security, limiter: abuse.NewLimiter(10000), challengeSlots: make(chan struct{}, 8), loginSlots: make(chan struct{}, 2)}
+	if cfg.Security.TurnstileSiteKey != "" {
+		app.verifier = verifier
+		if app.verifier == nil {
+			app.verifier = abuse.NewTurnstile(cfg.Security.TurnstileSecretKey)
+		}
+	}
 	mux := http.NewServeMux()
 	app.routes(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +111,16 @@ func New(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS, logge
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src "+connectSrc+"; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		scripts, frames := "'self'", "'none'"
+		if cfg.Security.TurnstileSiteKey != "" {
+			scripts += " https://challenges.cloudflare.com"
+			frames = "https://challenges.cloudflare.com"
+		}
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src "+connectSrc+"; script-src "+scripts+"; frame-src "+frames+"; style-src 'self'; img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+		if strings.HasPrefix(cfg.BaseURL, "https://") || r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/admin") || strings.HasPrefix(r.URL.Path, "/e/") {
 			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("X-Robots-Tag", "noindex, nofollow")
@@ -105,7 +129,7 @@ func New(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS, logge
 	})
 	return &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           handler,
+		Handler:           &maintainedHandler{Handler: handler, uploads: uploads, logger: logger},
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -116,6 +140,15 @@ func New(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS, logge
 
 // Serve waits for cancellation and drains HTTP requests before it returns.
 func Serve(ctx context.Context, srv *http.Server, listener net.Listener, logger *slog.Logger) error {
+	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)
+	maintenanceDone := make(chan struct{})
+	go func() {
+		defer close(maintenanceDone)
+		if h, ok := srv.Handler.(*maintainedHandler); ok {
+			h.maintain(maintenanceCtx, 5*time.Minute)
+		}
+	}()
+	defer func() { stopMaintenance(); <-maintenanceDone }()
 	result := make(chan error, 1)
 	go func() { result <- srv.Serve(listener) }()
 	select {

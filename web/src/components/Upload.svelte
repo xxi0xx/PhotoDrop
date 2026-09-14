@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { request, message, formatBytes } from '../lib/api';
-  import { runDirect, type UploadPlan, type Prepared, type DirectAttempt } from '../lib/direct-upload';
+  import { request, message, formatBytes, APIError, type Challenge } from '../lib/api';
+  import Turnstile from './Turnstile.svelte';
+  import { runDirect, recoverUploadGrant, type UploadPlan, type Prepared, type DirectAttempt } from '../lib/direct-upload';
 
-  let { publicID, maxFileSize }: { publicID: string; maxFileSize: number } = $props();
-  type Item = { file: File; status: 'waiting' | 'preparing' | 'uploading' | 'verifying' | 'ready' | 'failed'; sent: number; error: string; attempt: DirectAttempt };
+  let { publicID, maxFileSize, challenge }: { publicID: string; maxFileSize: number; challenge?: Challenge } = $props();
+  type Grant = { id: string; expires_at: string; strategy: string };
+  type Item = { file: File; status: 'waiting' | 'preparing' | 'uploading' | 'verifying' | 'ready' | 'failed'; sent: number; error: string; attempt: DirectAttempt; grant?: Grant };
   const batchLimit = 100;
   const concurrency = 3;
   let items = $state<Item[]>([]);
@@ -12,8 +14,10 @@
   let error = $state('');
   let attempted = $state(false);
   let input = $state<HTMLInputElement>();
-  let sessionID = '';
-  let strategy = 'local';
+  let grant = $state<Grant | null>(null);
+  let challengeToken = $state('');
+  let challengeVersion = $state(0);
+  let creating: Promise<Grant> | null = null;
   let canceled = false;
   const active = new Set<XMLHttpRequest>();
   const totalBytes = $derived(items.reduce((sum, item) => sum + item.file.size, 0));
@@ -28,14 +32,29 @@
     if (!files.length) return;
     if (files.length > batchLimit) { error = `Choose up to ${batchLimit} photos at a time.`; return; }
     items = files.map(file => ({ file, status: 'waiting', sent: 0, error: '', attempt: { requestID: Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2,'0')).join('') } }));
-    sessionID = ''; error = ''; attempted = false;
+    grant = null; error = ''; attempted = false; challengeToken = ''; challengeVersion++;
+  }
+
+  async function getGrant(): Promise<Grant> {
+    if (grant) return grant;
+    if (creating) return creating;
+    if (challenge && !challengeToken) throw new Error('Please complete verification before uploading.');
+    const token = challengeToken;
+    creating = (async () => {
+      try {
+        const result = await request<{ upload_session: { id: string; expires_at: string }; upload_strategy: string }>(`/api/public/events/${encodeURIComponent(publicID)}/upload-sessions`, 'POST', challenge ? { turnstile_token: token } : {});
+        grant = { ...result.upload_session, strategy: result.upload_strategy };
+        return grant;
+      } finally { challengeToken = ''; challengeVersion++; creating = null; }
+    })();
+    return creating;
   }
 
   function transfer(item: Item, plan?: UploadPlan): Promise<void> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       const finish = (cause?: Error) => { active.delete(xhr); cause ? reject(cause) : resolve(); };
-      xhr.open(plan?.method ?? 'POST', plan?.url ?? `/api/public/events/${encodeURIComponent(publicID)}/upload-sessions/${sessionID}/assets`);
+      xhr.open(plan?.method ?? 'POST', plan?.url ?? `/api/public/events/${encodeURIComponent(publicID)}/upload-sessions/${item.grant!.id}/assets`);
       xhr.timeout = 10 * 60 * 1000 + 15000;
       if (plan) {
         for (const [name,value] of Object.entries(plan.headers)) xhr.setRequestHeader(name,value);
@@ -47,10 +66,10 @@
       xhr.upload.onprogress = event => { item.sent = Math.min(event.loaded, item.file.size); };
       xhr.onload = () => {
         if (plan) { finish(xhr.status >= 200 && xhr.status < 300 ? undefined : new Error('Upload did not finish. Please retry this photo.')); return; }
-        let body: { asset?: { status?: string }; error?: { message?: string } } = {};
+        let body: { asset?: { status?: string }; error?: { message?: string; code?: string } } = {};
         try { body = JSON.parse(xhr.responseText); } catch { /* Use a safe generic error. */ }
         if (xhr.status === 201 && body.asset?.status === 'ready') finish();
-        else finish(new Error(body.error?.message || 'Upload failed. Please try again.'));
+        else finish(new APIError(body.error?.message || 'Upload failed. Please try again.', xhr.status, {}, body.error?.code));
       };
       xhr.onerror = () => finish(new Error('Connection lost. Please try again.'));
       xhr.ontimeout = () => finish(new Error('Upload timed out. Please try again.'));
@@ -69,10 +88,7 @@
     busy = true; canceled = false; attempted = true; error = '';
     for (const item of selected) { item.status = 'waiting'; item.error = ''; item.sent = 0; }
     try {
-      if (!sessionID) {
-        const session = await request<{ upload_session: { id: string }; upload_strategy: string }>(`/api/public/events/${encodeURIComponent(publicID)}/upload-sessions`, 'POST', {});
-        sessionID = session.upload_session.id; strategy = session.upload_strategy;
-      }
+      let batchGrant: Promise<Grant> | undefined;
       let next = 0;
       async function worker() {
         while (!canceled && next < selected.length) {
@@ -81,8 +97,9 @@
           try {
             if (!item.file.size) throw new Error('This file is empty.');
             if (item.file.size > maxFileSize) throw new Error(`This file exceeds the ${formatBytes(maxFileSize)} limit.`);
-            if (strategy === 'direct') {
-              const base = `/api/public/events/${encodeURIComponent(publicID)}/upload-sessions/${sessionID}/assets`;
+            item.grant ??= await (batchGrant ??= getGrant());
+            if (item.grant.strategy === 'direct') {
+              const base = `/api/public/events/${encodeURIComponent(publicID)}/upload-sessions/${item.grant.id}/assets`;
               await runDirect(item.attempt, {
                 prepare: () => request<Prepared>(`${base}/prepare`, 'POST', { filename: item.file.name, size: item.file.size, content_type: item.file.type || 'application/octet-stream', request_id: item.attempt.requestID }),
                 authorize: id => request<Prepared>(`${base}/${id}/authorize`, 'POST', {}),
@@ -92,7 +109,11 @@
               });
             } else await transfer(item);
             item.status = 'ready'; item.sent = item.file.size;
-          } catch (cause) { item.status = 'failed'; item.sent = 0; item.error = message(cause); }
+          } catch (cause) {
+            const stage = item.status;
+            item.status = 'failed'; item.sent = 0; item.error = message(cause);
+            if (recoverUploadGrant(item, cause, stage)) grant = null;
+          }
         }
       }
       await Promise.all(Array.from({ length: Math.min(concurrency, selected.length) }, worker));
@@ -105,7 +126,7 @@
   }
 
   function cancel() { canceled = true; for (const xhr of active) xhr.abort(); }
-  function addMore() { items = []; attempted = false; sessionID = ''; error = ''; if (input) input.value = ''; }
+  function addMore() { items = []; attempted = false; grant = null; challengeToken = ''; error = ''; if (input) input.value = ''; }
   onDestroy(cancel);
 </script>
 
@@ -143,5 +164,8 @@
       {:else if failed}<button type="button" onclick={() => start(true)}>Retry Failed ({failed})</button>
       {:else if waiting}<button type="button" onclick={() => start()}>Upload {waiting} {waiting === 1 ? 'Photo' : 'Photos'}</button>{/if}
     </div>
+    {#if challenge && !grant && completed < items.length}
+      {#key challengeVersion}<Turnstile siteKey={challenge.site_key} action={challenge.action} onToken={token => challengeToken = token} />{/key}
+    {/if}
   {/if}
 </section>
