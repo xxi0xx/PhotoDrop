@@ -156,13 +156,13 @@ keeps the event closed and deletion retryable; necessary metadata is retained.
 
 Startup cleanup retains Gate 4's one-hour staleness rules, two-second budget,
 bounded batches, and recorded-key-only deletion. Missing historical credentials
-defer the relevant cleanup. Late objects may remain until another startup, and
+defer the relevant cleanup. Gate 5 also runs bounded cleanup every five minutes, and
 retired-key records are retained. CSP allows the exact upload origins of the
 configured backends so historical pending assets can refresh in the existing UI.
 
 This patch does not move/copy media, provide multiple active destinations, create
 a backend/credential-management UI, or add an encryption system. It does not
-implement any Gate 5 abuse controls or media features. Live R2 testing remains
+add media features. Gate 5 abuse controls are described in [security.md](security.md). Live R2 testing remains
 unverified without credentials; deterministic tests and isolated Compose/browser
 tests cover backend routing separately from live-provider interoperability.
 

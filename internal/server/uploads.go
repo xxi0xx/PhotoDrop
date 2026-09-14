@@ -5,8 +5,10 @@ import (
 	"errors"
 	"mime"
 	"net/http"
+	"net/url"
 	"time"
 
+	"photodrop/internal/abuse"
 	"photodrop/internal/events"
 	"photodrop/internal/media"
 )
@@ -30,11 +32,52 @@ func (a *application) createUploadSession(w http.ResponseWriter, r *http.Request
 	if !a.sameOrigin(w, r) {
 		return
 	}
-	var input struct{}
-	if !decodeJSON(w, r, &input, 1024) {
+	var input struct {
+		Token string `json:"turnstile_token"`
+	}
+	if !decodeJSON(w, r, &input, 4096) {
 		return
 	}
-	session, err := a.media.CreateSession(r.Context(), r.PathValue("public_id"))
+	verified := false
+	if a.security.TurnstileSiteKey != "" {
+		if input.Token == "" || len(input.Token) > 2048 {
+			a.fail(w, abuse.ErrChallenge)
+			return
+		}
+		e, err := a.events.GetPublic(r.Context(), r.PathValue("public_id"))
+		if err != nil {
+			a.fail(w, err)
+			return
+		}
+		if e.Status(time.Now()) != "open" {
+			a.fail(w, media.ErrClosed)
+			return
+		}
+		select {
+		case a.challengeSlots <- struct{}{}:
+		default:
+			a.rateFailure(w, "verification", 1)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		result, err := a.verifier.Verify(ctx, input.Token)
+		cancel()
+		<-a.challengeSlots
+		if err != nil {
+			if !errors.Is(err, abuse.ErrChallenge) {
+				err = abuse.ErrChallengeUnavailable
+			}
+			a.fail(w, err)
+			return
+		}
+		expected, _ := url.Parse(a.baseURL)
+		if err := abuse.Validate(result, expected.Hostname()); err != nil {
+			a.fail(w, err)
+			return
+		}
+		verified = true
+	}
+	session, err := a.media.CreateVerifiedSession(r.Context(), r.PathValue("public_id"), verified)
 	if err != nil {
 		a.fail(w, err)
 		return

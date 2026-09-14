@@ -110,12 +110,9 @@ func (s *Service) Prepare(ctx context.Context, publicID, sessionID string, p Pre
 		if err := checkOpen(ctx, tx, e.ID, publicID); err != nil {
 			return "", err
 		}
-		var associated bool
-		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM upload_sessions WHERE id=? AND event_id=?)", sessionID, e.ID).Scan(&associated); err != nil {
+		q, err := checkSession(ctx, tx, e.ID, sessionID)
+		if err != nil {
 			return "", err
-		}
-		if !associated {
-			return "", ErrSession
 		}
 		var id, name, contentType string
 		var size int64
@@ -130,6 +127,9 @@ func (s *Service) Prepare(ctx context.Context, publicID, sessionID string, p Pre
 			return "", err
 		}
 		id = randomID()
+		if err := reserve(ctx, tx, e.ID, sessionID, p.Size, q); err != nil {
+			return "", err
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO assets(id,event_id,upload_session_id,original_filename,storage_key,status,created_at,storage_provider,storage_target,expected_size_bytes,expected_mime_type,client_request_id,storage_backend_id)
    VALUES(?,?,?,?,?,'pending',?,'s3',?,?,?,?,?)`, id, e.ID, sessionID, p.Filename, direct.Key(e.ID, id), timestamp(), direct.Target(), p.Size, p.ContentType, p.RequestID, active.ID)
 		if err != nil {
@@ -193,6 +193,9 @@ func (s *Service) Authorize(ctx context.Context, publicID, sessionID, id string)
 	}
 	defer tx.Rollback()
 	if err := checkOpen(ctx, tx, a.eventID, publicID); err != nil {
+		return Prepared{}, err
+	}
+	if _, err := checkSession(ctx, tx, a.eventID, sessionID); err != nil {
 		return Prepared{}, err
 	}
 	if _, err := tx.ExecContext(ctx, "UPDATE assets SET authorized_until=? WHERE id=? AND status='pending'", plan.ExpiresAt.UTC().Format(time.RFC3339Nano), id); err != nil {
@@ -293,7 +296,7 @@ func (s *Service) Complete(ctx context.Context, publicID, sessionID, id string) 
 }
 
 func (s *Service) cleanupRetired(ctx context.Context) error {
-	rows, err := s.db.QueryContext(ctx, "SELECT storage_key,storage_backend_id,event_id,asset_id FROM s3_cleanup WHERE checked_at < ? ORDER BY checked_at LIMIT 1000", time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano))
+	rows, err := s.db.QueryContext(ctx, "SELECT storage_key,storage_backend_id,event_id,asset_id FROM s3_cleanup WHERE checked_at < ? AND storage_key > ? ORDER BY storage_key LIMIT 1000", time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano), s.retiredAfter)
 	if err != nil {
 		return err
 	}
@@ -317,6 +320,7 @@ func (s *Service) cleanupRetired(ctx context.Context) error {
 		return err
 	}
 	for _, r := range items {
+		s.retiredAfter = r.key
 		direct, err := s.checkDirectKey(r.eventID, r.id, r.key, r.backendID)
 		if err == nil {
 			err = direct.Delete(ctx, r.key)
@@ -332,6 +336,9 @@ func (s *Service) cleanupRetired(ctx context.Context) error {
 			return err
 		}
 		s.logger.Info("retired object reconciled", "asset_id", r.id)
+	}
+	if len(items) < 1000 {
+		s.retiredAfter = ""
 	}
 	return nil
 }

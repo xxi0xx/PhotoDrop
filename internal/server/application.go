@@ -14,7 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"photodrop/internal/abuse"
 	"photodrop/internal/auth"
+	"photodrop/internal/config"
 	"photodrop/internal/events"
 	"photodrop/internal/media"
 	"photodrop/internal/storage"
@@ -23,13 +25,18 @@ import (
 const sessionCookie = "photodrop_session"
 
 type application struct {
-	events      *events.Store
-	auth        *auth.Manager
-	media       *media.Service
-	maxFileSize int64
-	baseURL     string
-	index       []byte
-	logger      *slog.Logger
+	events         *events.Store
+	auth           *auth.Manager
+	media          *media.Service
+	maxFileSize    int64
+	baseURL        string
+	index          []byte
+	logger         *slog.Logger
+	security       config.Security
+	limiter        *abuse.Limiter
+	verifier       abuse.Verifier
+	challengeSlots chan struct{}
+	loginSlots     chan struct{}
 }
 
 func (a *application) routes(mux *http.ServeMux) {
@@ -39,12 +46,12 @@ func (a *application) routes(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /e/{public_id}", a.publicPage)
 	mux.HandleFunc("GET /api/public/events/{public_id}", a.publicEvent)
-	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions", a.createUploadSession)
-	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets", a.uploadAsset)
-	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets/prepare", a.prepareAsset)
-	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets/{asset_id}/authorize", a.authorizeAsset)
-	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets/{asset_id}/complete", a.completeAsset)
-	mux.HandleFunc("POST /api/admin/login", a.login)
+	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions", a.guarded("session", a.createUploadSession))
+	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets", a.guarded("local", a.uploadAsset))
+	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets/prepare", a.guarded("prepare", a.prepareAsset))
+	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets/{asset_id}/authorize", a.guarded("authorize", a.authorizeAsset))
+	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets/{asset_id}/complete", a.guarded("complete", a.completeAsset))
+	mux.HandleFunc("POST /api/admin/login", a.guarded("login", a.login))
 	mux.HandleFunc("POST /api/admin/logout", a.protected(a.logout))
 	mux.HandleFunc("GET /api/admin/session", a.protected(func(w http.ResponseWriter, r *http.Request, s auth.Session) { writeJSON(w, 200, s) }))
 	mux.HandleFunc("GET /api/admin/events", a.protected(a.listEvents))
@@ -90,10 +97,25 @@ func (a *application) fail(w http.ResponseWriter, err error) {
 	var validation *events.ValidationError
 	var tooLarge *http.MaxBytesError
 	switch {
+	case errors.Is(err, media.ErrExpired):
+		a.logger.Info("upload session expired")
+		apiError(w, 409, "session_expired", media.ErrExpired.Error(), nil)
+	case errors.Is(err, media.ErrEventQuota):
+		a.logger.Info("event quota reached")
+		apiError(w, 409, "event_quota", media.ErrEventQuota.Error(), nil)
+	case errors.Is(err, media.ErrSessionQuota):
+		a.logger.Info("session quota reached")
+		apiError(w, 409, "session_quota", media.ErrSessionQuota.Error(), nil)
+	case errors.Is(err, abuse.ErrChallengeUnavailable):
+		a.logger.Info("Turnstile service unavailable")
+		apiError(w, 503, "verification_unavailable", abuse.ErrChallengeUnavailable.Error(), nil)
+	case errors.Is(err, abuse.ErrChallenge), errors.Is(err, abuse.ErrChallengeExpired):
+		a.logger.Info("Turnstile verification failed")
+		apiError(w, 403, "verification_failed", err.Error(), nil)
 	case errors.Is(err, media.ErrStrategy):
 		apiError(w, 409, "upload_strategy", media.ErrStrategy.Error(), nil)
 	case errors.Is(err, media.ErrAsset):
-		apiError(w, 404, "asset_not_found", media.ErrAsset.Error(), nil)
+		apiError(w, 404, "asset_not_found", "This upload attempt is no longer available. Retry to start a new session.", nil)
 	case errors.Is(err, media.ErrReady):
 		apiError(w, 409, "asset_ready", media.ErrReady.Error(), nil)
 	case errors.Is(err, media.ErrRequest):
@@ -108,7 +130,7 @@ func (a *application) fail(w http.ResponseWriter, err error) {
 	case errors.Is(err, media.ErrClosed):
 		apiError(w, 409, "event_closed", "This event is no longer accepting uploads.", nil)
 	case errors.Is(err, media.ErrSession):
-		apiError(w, 404, "upload_session_not_found", "Upload session not found for this event. Reload the page and try again.", nil)
+		apiError(w, 404, "upload_session_not_found", "This upload session is no longer available. Retry to start a new session.", nil)
 	case errors.Is(err, media.ErrFilename):
 		apiError(w, 422, "invalid_filename", "Provide a filename of 1 to 255 valid characters.", nil)
 	case errors.Is(err, media.ErrType):
@@ -193,6 +215,9 @@ func (a *application) sameOrigin(w http.ResponseWriter, r *http.Request) bool {
 		}
 	}
 	if origin != expected || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		if a.logger != nil {
+			a.logger.Info("foreign or missing origin rejected")
+		}
 		apiError(w, 403, "csrf", "Request origin was not accepted", nil)
 		return false
 	}
@@ -238,6 +263,13 @@ func (a *application) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input, 1024) {
 		return
 	}
+	select {
+	case a.loginSlots <- struct{}{}:
+		defer func() { <-a.loginSlots }()
+	default:
+		a.rateFailure(w, "login", 1)
+		return
+	}
 	token, session, err := a.auth.Login(r.Context(), input.Password, cookieToken(r))
 	if errors.Is(err, auth.ErrUnauthorized) {
 		a.logger.Info("admin login failed")
@@ -254,6 +286,9 @@ func (a *application) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *application) logout(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	if !emptyControl(w, r) {
+		return
+	}
 	if err := a.auth.Logout(r.Context(), cookieToken(r)); err != nil {
 		a.fail(w, err)
 		return
@@ -343,6 +378,9 @@ func (a *application) updateEvent(w http.ResponseWriter, r *http.Request, _ auth
 }
 
 func (a *application) deleteEvent(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	if !emptyControl(w, r) {
+		return
+	}
 	id := internalID(r)
 	if err := a.media.DeleteEvent(r.Context(), id); err != nil {
 		a.fail(w, err)
@@ -398,6 +436,10 @@ func (a *application) publicEvent(w http.ResponseWriter, r *http.Request) {
 		Description string  `json:"description,omitempty"`
 		EventDate   *string `json:"event_date,omitempty"`
 		MaxFileSize int64   `json:"max_file_size,omitempty"`
+		Challenge   *struct {
+			SiteKey string `json:"site_key"`
+			Action  string `json:"action"`
+		} `json:"challenge,omitempty"`
 	}
 	guest := guestEvent{Name: e.Name, Status: "closed"}
 	if e.Status(time.Now()) == "open" {
@@ -405,6 +447,12 @@ func (a *application) publicEvent(w http.ResponseWriter, r *http.Request) {
 		guest.Description = e.Description
 		guest.EventDate = e.EventDate
 		guest.MaxFileSize = a.maxFileSize
+		if a.security.TurnstileSiteKey != "" {
+			guest.Challenge = &struct {
+				SiteKey string `json:"site_key"`
+				Action  string `json:"action"`
+			}{a.security.TurnstileSiteKey, abuse.ChallengeAction}
+		}
 	}
 	writeJSON(w, 200, map[string]any{"event": guest})
 }

@@ -154,7 +154,8 @@ Wrong-size or invalid-image objects are deleted, but the pending asset and its
 immutable expected metadata remain for retry. If verification or its final
 database transaction fails transiently, existing bytes remain for retry.
 Concurrent finalizers serialize per asset; SQLite write transactions are short
-and never span remote I/O. Only verified `ready` assets count in admin totals.
+and never span remote I/O. Admin totals show verified `ready` assets, with pending
+photo/byte reservations shown separately. Both count toward security quotas.
 
 An ambiguous PUT first triggers completion. If the object is valid, it completes
 without another upload. If it is missing/invalid, the client refreshes the same
@@ -169,7 +170,8 @@ finalize or issue new authorization. An already-issued URL cannot be revoked.
 A presigned PUT does **not** enforce a portable pre-storage body-size limit.
 Oversize declarations are rejected before signing; oversized actual objects are
 rejected/deleted during completion. An abusive client can still consume storage
-before verification. Gate 5's abuse controls are not implemented here.
+before verification. Gate 5 limits grants, preparations, and expected-byte
+reservations; it cannot prevent this pre-verification object-store cost.
 
 ## Cleanup and provider switching
 
@@ -177,16 +179,17 @@ Startup attempts at most 1,000 stale pending assets, requiring both creation and
 latest authorization expiry to be more than an hour old for S3. Fresh/recently
 refreshed pending assets and all ready assets are excluded. Cleanup deletes only
 recorded, validated keys; missing objects count as clean, provider errors retain
-metadata. No bucket listing or background job is used.
+metadata. The same cleanup runs every five minutes, with a five-second cycle
+budget; no bucket listing or separate worker service is used.
 
 Event deletion dispatches using each asset's durable backend record. It removes media
 before removing the corresponding metadata; partial failures keep the event
 closed and retryable, matching Gate 3. Each retired S3 key is first recorded in
 `s3_cleanup`, independently of event cascades. Because old URLs or uploads already
 in flight can recreate a deleted object, startup also rechecks up to 1,000 retired
-keys last checked more than an hour ago. These small records are retained, keys
-are never reused, and rechecking cannot delete a newer asset. **Late objects may
-remain until a later restart; there is no periodic reconciliation.** Retired-key
+keys last checked more than an hour ago. Periodic cleanup repeats this check.
+These small records are retained, keys are never reused, and rechecking cannot
+delete a newer asset. Retired-key
 metadata grows with S3 deletions; this is a deliberate recovery tradeoff.
 
 Switching `local` ↔ S3-A ↔ S3-B affects new assets only. Each asset and retired

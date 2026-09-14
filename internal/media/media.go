@@ -14,22 +14,26 @@ import (
 	"sync"
 	"time"
 
+	"photodrop/internal/config"
 	"photodrop/internal/events"
 	"photodrop/internal/storage"
 )
 
 type Service struct {
-	db         *sql.DB
-	events     *events.Store
-	storage    storage.Store
-	logger     *slog.Logger
-	locks      sync.Map // internal event ID -> *sync.RWMutex; only existing events acquire entries
-	backends   *storage.Backends
-	assetLocks [64]sync.Mutex
+	db                         *sql.DB
+	events                     *events.Store
+	storage                    storage.Store
+	logger                     *slog.Logger
+	locks                      sync.Map // internal event ID -> *sync.RWMutex; only existing events acquire entries
+	backends                   *storage.Backends
+	assetLocks                 [64]sync.Mutex
+	security                   config.Security
+	cleanupMu                  sync.Mutex
+	cleanupAfter, retiredAfter string
 }
 
 func New(db *sql.DB, objects storage.Store, logger *slog.Logger) *Service {
-	return &Service{db: db, events: events.New(db), storage: objects, logger: logger, backends: storage.LocalBackends()}
+	return &Service{db: db, events: events.New(db), storage: objects, logger: logger, backends: storage.LocalBackends(), security: config.Security{}.Defaults()}
 }
 
 // ConfigureBackends is called once during startup, before cleanup or requests.
@@ -68,10 +72,14 @@ func (s *Service) openEvent(ctx context.Context, publicID string) (events.Event,
 }
 
 type Session struct {
-	ID string `json:"id"`
+	ID        string    `json:"id"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 func (s *Service) CreateSession(ctx context.Context, publicID string) (Session, error) {
+	return s.CreateVerifiedSession(ctx, publicID, false)
+}
+func (s *Service) CreateVerifiedSession(ctx context.Context, publicID string, verified bool) (Session, error) {
 	e, err := s.openEvent(ctx, publicID)
 	if err != nil {
 		return Session{}, err
@@ -89,14 +97,19 @@ func (s *Service) CreateSession(ctx context.Context, publicID string) (Session, 
 		return Session{}, err
 	}
 	id, now := randomID(), timestamp()
-	if _, err := tx.ExecContext(ctx, "INSERT INTO upload_sessions(id, event_id, created_at, updated_at) VALUES (?, ?, ?, ?)", id, e.ID, now, now); err != nil {
+	expires := time.Now().UTC().Add(s.security.SessionTTL)
+	var verifiedAt any
+	if verified {
+		verifiedAt = now
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO upload_sessions(id, event_id, created_at, updated_at, expires_at, max_assets, max_bytes, challenge_verified_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", id, e.ID, now, now, expires.Format(time.RFC3339Nano), s.security.SessionMaxAssets, s.security.SessionMaxBytes, verifiedAt); err != nil {
 		return Session{}, fmt.Errorf("create upload session: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return Session{}, err
 	}
 	s.logger.Info("upload session created", "event_id", e.ID)
-	return Session{ID: id}, nil
+	return Session{ID: id, ExpiresAt: expires}, nil
 }
 
 func checkOpen(ctx context.Context, tx *sql.Tx, eventID int64, publicID string) error {
@@ -164,15 +177,19 @@ func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, dec
 	if err := checkOpen(ctx, tx, e.ID, publicID); err != nil {
 		return Asset{}, err
 	}
-	var associated bool
-	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM upload_sessions WHERE id = ? AND event_id = ?)", sessionID, e.ID).Scan(&associated); err != nil {
+	q, err := checkSession(ctx, tx, e.ID, sessionID)
+	if err != nil {
 		return Asset{}, err
 	}
-	if !associated {
-		return Asset{}, ErrSession
+	expected := claimedSize
+	if expected < 0 {
+		expected = limit
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO assets(id, event_id, upload_session_id, original_filename, storage_key, status, created_at, storage_backend_id)
-		VALUES (?, ?, ?, ?, ?, 'pending', ?, 1)`, id, e.ID, sessionID, filename, key, now); err != nil {
+	if err := reserve(ctx, tx, e.ID, sessionID, expected, q); err != nil {
+		return Asset{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO assets(id, event_id, upload_session_id, original_filename, storage_key, status, created_at, storage_backend_id, expected_size_bytes)
+		VALUES (?, ?, ?, ?, ?, 'pending', ?, 1, ?)`, id, e.ID, sessionID, filename, key, now, expected); err != nil {
 		return Asset{}, fmt.Errorf("create pending asset: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -191,7 +208,7 @@ func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, dec
 			}
 		}
 	}()
-	bounded := io.LimitReader(source, limit+1)
+	bounded := io.LimitReader(source, expected+1)
 	var prefix [512]byte
 	n, err := io.ReadFull(bounded, prefix[:])
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
@@ -200,11 +217,14 @@ func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, dec
 	if int64(n) > limit {
 		return Asset{}, storage.ErrTooLarge
 	}
+	if int64(n) > expected {
+		return Asset{}, ErrSize
+	}
 	kind, err := Sniff(prefix[:n])
 	if err != nil {
 		return Asset{}, err
 	}
-	object, err := s.storage.Put(ctx, key, io.MultiReader(bytes.NewReader(prefix[:n]), bounded), limit)
+	object, err := s.storage.Put(ctx, key, io.MultiReader(bytes.NewReader(prefix[:n]), bounded), expected)
 	if err != nil {
 		return Asset{}, err
 	}
@@ -240,12 +260,14 @@ func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, dec
 }
 
 type Stats struct {
-	PhotoCount   int64 `json:"photo_count"`
-	StorageBytes int64 `json:"storage_bytes"`
+	PhotoCount    int64 `json:"photo_count"`
+	StorageBytes  int64 `json:"storage_bytes"`
+	PendingCount  int64 `json:"pending_count,omitempty"`
+	ReservedBytes int64 `json:"reserved_bytes,omitempty"`
 }
 
 func (s *Service) Stats(ctx context.Context) (map[int64]Stats, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT event_id, COUNT(*), COALESCE(SUM(size_bytes), 0) FROM assets WHERE status = 'ready' GROUP BY event_id")
+	rows, err := s.db.QueryContext(ctx, "SELECT event_id, SUM(status='ready'), COALESCE(SUM(CASE WHEN status='ready' THEN size_bytes ELSE 0 END),0), SUM(status='pending'), COALESCE(SUM(CASE WHEN status='pending' THEN expected_size_bytes ELSE 0 END),0) FROM assets GROUP BY event_id")
 	if err != nil {
 		return nil, fmt.Errorf("read media statistics: %w", err)
 	}
@@ -254,7 +276,7 @@ func (s *Service) Stats(ctx context.Context) (map[int64]Stats, error) {
 	for rows.Next() {
 		var id int64
 		var stats Stats
-		if err := rows.Scan(&id, &stats.PhotoCount, &stats.StorageBytes); err != nil {
+		if err := rows.Scan(&id, &stats.PhotoCount, &stats.StorageBytes, &stats.PendingCount, &stats.ReservedBytes); err != nil {
 			return nil, err
 		}
 		result[id] = stats
@@ -312,11 +334,23 @@ func (s *Service) removeAttempt(ctx context.Context, eventID int64, id, key stri
 	return err
 }
 
-// Cleanup is bounded and runs only at startup. An hour exceeds the ten-minute
-// upload deadline; recent pending rows remain excluded from completed totals.
+// Cleanup runs in bounded startup and periodic passes. An hour exceeds the
+// ten-minute upload deadline; recent pending rows continue reserving capacity.
 func (s *Service) Cleanup(ctx context.Context) error {
+	if !s.cleanupMu.TryLock() {
+		return nil
+	}
+	defer s.cleanupMu.Unlock()
+	// Empty expired grants have no remaining upload/finalization capability.
+	// Reclaim a bounded batch without cascading any asset or retired-key state.
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM upload_sessions WHERE id IN
+	 (SELECT u.id FROM upload_sessions u WHERE u.expires_at <= ?
+	 AND NOT EXISTS(SELECT 1 FROM assets a WHERE a.upload_session_id=u.id)
+	 ORDER BY u.expires_at LIMIT 5000)`, timestamp()); err != nil {
+		return err
+	}
 	cutoff := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
-	rows, err := s.db.QueryContext(ctx, "SELECT event_id, id, storage_key FROM assets WHERE status = 'pending' AND created_at < ? AND (authorized_until IS NULL OR authorized_until < ?) ORDER BY created_at LIMIT 1000", cutoff, cutoff)
+	rows, err := s.db.QueryContext(ctx, "SELECT event_id, id, storage_key FROM assets WHERE status = 'pending' AND created_at < ? AND (authorized_until IS NULL OR authorized_until < ?) AND id > ? ORDER BY id LIMIT 1000", cutoff, cutoff, s.cleanupAfter)
 	if err != nil {
 		return err
 	}
@@ -339,14 +373,31 @@ func (s *Service) Cleanup(ctx context.Context) error {
 		return err
 	}
 	for _, p := range attempts {
-		if err := s.removeAttempt(ctx, p.eventID, p.id, p.key); err != nil {
+		s.cleanupAfter = p.id
+		// Periodic maintenance must not race a transfer, refresh, or completion.
+		lock := s.lock(p.eventID)
+		if !lock.TryLock() {
+			continue
+		}
+		var stale bool
+		err := s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM assets WHERE id=? AND status='pending' AND created_at < ? AND (authorized_until IS NULL OR authorized_until < ?))", p.id, cutoff, cutoff).Scan(&stale)
+		if err == nil && stale {
+			err = s.removeAttempt(ctx, p.eventID, p.id, p.key)
+		}
+		lock.Unlock()
+		if err != nil {
 			s.logger.Error("stale pending cleanup failed", "asset_id", p.id, "error", err)
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-		} else {
+		} else if stale {
 			s.logger.Info("stale pending asset removed", "asset_id", p.id)
 		}
+	}
+	// A bounded in-memory cursor keeps unavailable historical backends from
+	// permanently starving later reservations. Retry earlier keys on the next pass.
+	if len(attempts) < 1000 {
+		s.cleanupAfter = ""
 	}
 	return s.cleanupRetired(ctx)
 }

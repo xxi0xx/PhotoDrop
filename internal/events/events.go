@@ -26,6 +26,8 @@ type Event struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	Deleting    bool       `json:"deleting"`
+	MaxAssets   *int64     `json:"max_assets"`
+	MaxBytes    *int64     `json:"max_bytes"`
 }
 
 // Input deliberately has no internal/public identifier or audit timestamps.
@@ -35,6 +37,8 @@ type Input struct {
 	EventDate   *string `json:"event_date"`
 	Enabled     *bool   `json:"enabled"`
 	ExpiresAt   *string `json:"expires_at"`
+	MaxAssets   *int64  `json:"max_assets"`
+	MaxBytes    *int64  `json:"max_bytes"`
 }
 
 type ValidationError struct{ Fields map[string]string }
@@ -54,6 +58,13 @@ func (e Event) Status(now time.Time) string {
 func validate(input Input) (Event, error) {
 	e := Event{Name: strings.TrimSpace(input.Name), Description: strings.TrimSpace(input.Description), EventDate: input.EventDate}
 	fields := map[string]string{}
+	e.MaxAssets, e.MaxBytes = input.MaxAssets, input.MaxBytes
+	if input.MaxAssets != nil && (*input.MaxAssets < 1 || *input.MaxAssets > 1000000) {
+		fields["max_assets"] = "Enter 1 to 1,000,000 photos, or leave empty"
+	}
+	if input.MaxBytes != nil && (*input.MaxBytes < 1 || *input.MaxBytes > 1<<50) {
+		fields["max_bytes"] = "Enter a positive storage limit up to 1 PiB, or leave empty"
+	}
 	if n := utf8.RuneCountInString(e.Name); n == 0 || n > 200 || strings.ContainsRune(e.Name, '\x00') {
 		fields["name"] = "Enter a name of 1 to 200 characters"
 	}
@@ -104,13 +115,13 @@ type Store struct{ db *sql.DB }
 
 func New(db *sql.DB) *Store { return &Store{db: db} }
 
-const columns = "id, public_id, name, description, event_date, enabled, expires_at, created_at, updated_at, deleting"
+const columns = "id, public_id, name, description, event_date, enabled, expires_at, created_at, updated_at, deleting, max_assets, max_bytes"
 
 func scan(row interface{ Scan(...any) error }) (Event, error) {
 	var e Event
 	var expiry *string
 	var created, updated string
-	if err := row.Scan(&e.ID, &e.PublicID, &e.Name, &e.Description, &e.EventDate, &e.Enabled, &expiry, &created, &updated, &e.Deleting); err != nil {
+	if err := row.Scan(&e.ID, &e.PublicID, &e.Name, &e.Description, &e.EventDate, &e.Enabled, &expiry, &created, &updated, &e.Deleting, &e.MaxAssets, &e.MaxBytes); err != nil {
 		return Event{}, err
 	}
 	var err error
@@ -145,9 +156,9 @@ func (s *Store) Create(ctx context.Context, input Input) (Event, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for range 3 {
 		row := s.db.QueryRowContext(ctx, `INSERT INTO events
-		    (public_id, name, description, event_date, enabled, expires_at, created_at, updated_at)
-		    VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(public_id) DO NOTHING RETURNING `+columns,
-			newPublicID(), e.Name, e.Description, e.EventDate, e.Enabled, expiryValue(e.ExpiresAt), now, now)
+		    (public_id, name, description, event_date, enabled, expires_at, created_at, updated_at, max_assets, max_bytes)
+		    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(public_id) DO NOTHING RETURNING `+columns,
+			newPublicID(), e.Name, e.Description, e.EventDate, e.Enabled, expiryValue(e.ExpiresAt), now, now, e.MaxAssets, e.MaxBytes)
 		saved, err := scan(row)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
@@ -205,8 +216,8 @@ func (s *Store) Update(ctx context.Context, id int64, input Input) (Event, error
 		return Event{}, err
 	}
 	row := s.db.QueryRowContext(ctx, `UPDATE events SET name = ?, description = ?, event_date = ?,
-	    enabled = ?, expires_at = ?, updated_at = ? WHERE id = ? AND deleting = 0 RETURNING `+columns,
-		e.Name, e.Description, e.EventDate, e.Enabled, expiryValue(e.ExpiresAt), time.Now().UTC().Format(time.RFC3339Nano), id)
+	    enabled = ?, expires_at = ?, updated_at = ?, max_assets = ?, max_bytes = ? WHERE id = ? AND deleting = 0 RETURNING `+columns,
+		e.Name, e.Description, e.EventDate, e.Enabled, expiryValue(e.ExpiresAt), time.Now().UTC().Format(time.RFC3339Nano), e.MaxAssets, e.MaxBytes, id)
 	e, err = scan(row)
 	if err != nil {
 		return Event{}, fmt.Errorf("update event: %w", err)
