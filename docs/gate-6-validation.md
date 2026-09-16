@@ -81,6 +81,11 @@ The isolated provider regression also passed local → S3-A → S3-B → local,
 historical refresh/finalization, mixed deletion, and missing-credential recovery.
 GitHub checks are tracked separately in the PR.
 
+The first clean GitHub Immich run hit a registry `toomanyrequests` response while
+pulling dependencies, before any lifecycle scenario ran. The workflow now pulls
+the pinned dependencies in a separate step with three bounded attempts and
+backoff. It does not retry or suppress application assertions.
+
 ## Portable export evidence
 
 The real integration scenario created one event, uploaded locally, switched to
