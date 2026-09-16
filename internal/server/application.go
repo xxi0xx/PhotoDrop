@@ -18,6 +18,7 @@ import (
 	"photodrop/internal/auth"
 	"photodrop/internal/config"
 	"photodrop/internal/events"
+	"photodrop/internal/integrations/immich"
 	"photodrop/internal/media"
 	"photodrop/internal/storage"
 )
@@ -28,6 +29,7 @@ type application struct {
 	events         *events.Store
 	auth           *auth.Manager
 	media          *media.Service
+	immich         *immich.Service
 	maxFileSize    int64
 	baseURL        string
 	index          []byte
@@ -59,7 +61,12 @@ func (a *application) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/admin/events/{id}", a.protected(a.getEvent))
 	mux.HandleFunc("PUT /api/admin/events/{id}", a.protected(a.updateEvent))
 	mux.HandleFunc("DELETE /api/admin/events/{id}", a.protected(a.deleteEvent))
+	mux.HandleFunc("GET /api/admin/events/{id}/immich", a.protected(a.immichStatus))
+	mux.HandleFunc("POST /api/admin/events/{id}/immich/test", a.protected(a.immichTest))
+	mux.HandleFunc("POST /api/admin/events/{id}/immich/jobs", a.protected(a.immichStart))
+	mux.HandleFunc("POST /api/admin/events/{id}/immich/cancel", a.protected(a.immichCancel))
 	for path, methods := range map[string]string{
+		"/api/admin/events/{id}/immich": "GET, HEAD", "/api/admin/events/{id}/immich/test": "POST", "/api/admin/events/{id}/immich/jobs": "POST", "/api/admin/events/{id}/immich/cancel": "POST",
 		"/api/admin/login": "POST", "/api/admin/logout": "POST", "/api/admin/session": "GET, HEAD",
 		"/api/admin/events": "GET, HEAD, POST", "/api/admin/events/{id}": "GET, HEAD, PUT, DELETE", "/api/public/events/{public_id}": "GET, HEAD",
 		"/api/public/events/{public_id}/upload-sessions":                                          "POST",

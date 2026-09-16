@@ -28,8 +28,11 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, logger *slog.Logger) error {
+	if len(args) > 0 && args[0] == "export" {
+		return exportEvent(ctx, args[1:], logger)
+	}
 	if len(args) != 0 && !(len(args) == 1 && args[0] == "healthcheck") {
-		return fmt.Errorf("usage: photodrop [healthcheck]")
+		return fmt.Errorf("usage: photodrop [healthcheck | export --event ID --output DIRECTORY]")
 	}
 	cfg, err := config.Load()
 	if err != nil {

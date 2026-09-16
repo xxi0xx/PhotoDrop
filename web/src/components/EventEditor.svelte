@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Immich from './Immich.svelte';
   import { onMount, tick } from 'svelte';
   import { request, message, publicURL, localDateTime, formatBytes, APIError, type EventRecord } from '../lib/api';
   let { id }: { id: string | null } = $props();
@@ -65,6 +66,7 @@
       <div class="field"><label for="max-storage">Maximum storage (GiB)</label><input id="max-storage" type="number" min="0.000000001" max="1048576" step="any" bind:value={maxStorageGiB} aria-invalid={!!fields.max_bytes} aria-describedby="storage-quota-hint" /><p id="storage-quota-hint" class="hint">Optional. 1 GiB = 1,073,741,824 bytes. Pending uploads reserve capacity. Lowering limits never deletes photos.</p>{#if fields.max_bytes}<p class="error">{fields.max_bytes}</p>{/if}</div>
       <div class="actions"><button type="submit">{busy ? 'Saving…' : id ? 'Save changes' : 'Create event'}</button><a href="/admin">Cancel</a></div>
     </fieldset></form>
+    {#if event}<Immich eventID={event.id} deleting={event.deleting} />{/if}
     {#if event}<section class="delete-panel" aria-labelledby="delete-heading"><h2 id="delete-heading">Delete event</h2>
       {#if confirming}<p>Delete “{event.name}” and all its uploaded photos permanently? Its public link will stop working. This cannot be undone.</p><div class="actions"><button class="danger" disabled={busy} bind:this={confirmButton} onclick={remove}>Delete event permanently</button><button class="secondary" disabled={busy} onclick={() => confirming = false}>Keep event</button></div>
       {:else}<p>Remove this event, its public page, and all its uploaded photos.</p><button class="danger secondary" disabled={busy} onclick={confirmDelete}>Delete event…</button>{/if}

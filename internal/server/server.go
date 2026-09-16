@@ -18,6 +18,7 @@ import (
 	"photodrop/internal/auth"
 	"photodrop/internal/config"
 	"photodrop/internal/events"
+	"photodrop/internal/integrations/immich"
 	"photodrop/internal/media"
 	"photodrop/internal/storage"
 )
@@ -48,6 +49,11 @@ func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS,
 		return nil, err
 	}
 	uploads.ConfigureBackends(backends)
+	targets, err := immich.Reconcile(ctx, db, cfg)
+	if err != nil {
+		return nil, err
+	}
+	imports := immich.New(db, uploads, targets, logger)
 	uploads.ConfigureSecurity(cfg.Security)
 	connectSrc := "'self'"
 	origins, err := backends.Origins(ctx)
@@ -79,6 +85,7 @@ func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS,
 			app.verifier = abuse.NewTurnstile(cfg.Security.TurnstileSecretKey)
 		}
 	}
+	app.immich = imports
 	mux := http.NewServeMux()
 	app.routes(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +136,7 @@ func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS,
 	})
 	return &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           &maintainedHandler{Handler: handler, uploads: uploads, logger: logger},
+		Handler:           &maintainedHandler{Handler: handler, uploads: uploads, logger: logger, imports: imports},
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -142,13 +149,20 @@ func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS,
 func Serve(ctx context.Context, srv *http.Server, listener net.Listener, logger *slog.Logger) error {
 	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)
 	maintenanceDone := make(chan struct{})
+	importsDone := make(chan struct{})
+	go func() {
+		defer close(importsDone)
+		if h, ok := srv.Handler.(*maintainedHandler); ok && h.imports != nil {
+			h.imports.Run(maintenanceCtx)
+		}
+	}()
 	go func() {
 		defer close(maintenanceDone)
 		if h, ok := srv.Handler.(*maintainedHandler); ok {
 			h.maintain(maintenanceCtx, 5*time.Minute)
 		}
 	}()
-	defer func() { stopMaintenance(); <-maintenanceDone }()
+	defer func() { stopMaintenance(); <-maintenanceDone; <-importsDone }()
 	result := make(chan error, 1)
 	go func() { result <- srv.Serve(listener) }()
 	select {

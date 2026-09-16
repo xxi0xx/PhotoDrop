@@ -1,15 +1,21 @@
 # PhotoDrop
 
-PhotoDrop is a self-hosted event photo collection app. **Gate 5 adds optional
-Turnstile, temporary upload grants, atomic quotas, and abuse controls to local
-and S3-compatible direct uploads, including the Cloudflare R2 S3 API:**
+PhotoDrop is a self-hosted event photo collection app. **Gate 6 adds portable
+event export and an optional native Immich integration to local and
+S3-compatible direct uploads, including historical storage backends:**
 guests select photos, see per-file and overall
 progress, and retry failed files. One administrator manages events and sees
 completed photo counts and storage totals. The Go/Svelte/SQLite foundation,
 authentication, event links, and one-container deployment remain intact.
 
-**Video, multipart/resumable uploads, Immich, QR generation, public downloads, galleries, thumbnails, exports,
-contributor names, and Gate 6 integrations are not implemented.**
+**Video-specific workflows, multipart/resumable guest uploads, QR generation,
+public downloads, galleries, thumbnails, contributor names, and Gate 7 UX
+features are not implemented.**
+
+Export an event with `photodrop export --event 1 --output /export/wedding`.
+The [export and Immich guide](docs/export-immich.md) covers manifests, safe filenames,
+Docker mounts, named targets, API permissions, background jobs, retries, and
+deletion independence. See the [Gate 6 validation record](docs/gate-6-validation.md).
 
 See [security configuration and operating limits](docs/security.md) before sharing
 an event publicly, and the [Gate 5 validation report](docs/gate-5-validation.md).
@@ -26,6 +32,9 @@ the [post-Gate-4 validation report](docs/storage-backends-validation.md).
 - One Go executable serves HTTP and the compiled Svelte frontend on port 8080.
 - SQLite uses `database/sql` and the CGO-free `modernc.org/sqlite` driver; no ORM.
 - SQL migrations and frontend assets are embedded at build time.
+- Local and recorded S3 backends expose streaming reads. Export is independent
+  of Immich; the optional adapter uses SQLite jobs and three concurrent transfers
+  in the existing Go process. API keys remain runtime configuration.
 - SQLite stores metadata and each asset's immutable storage backend identity. Image bytes live under
   `/data/uploads` in local mode or in a private S3-compatible bucket in S3 mode.
 - One production container and one `/data` volume; no external database, Redis,

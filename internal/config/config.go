@@ -23,6 +23,8 @@ type Config struct {
 	S3Backends        map[string]S3 `json:"-"`
 	S3                S3            `json:"-"`
 	Security          Security
+	ImmichTarget      string
+	ImmichTargets     map[string]Immich `json:"-"`
 }
 
 // Formatting configuration must never expose passwords or object-store secrets.
@@ -85,6 +87,9 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, err
 	}
 	if err := cfg.loadSecurity(lookup); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.loadImmich(lookup); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil

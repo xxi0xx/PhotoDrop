@@ -1,0 +1,58 @@
+name: Immich integration
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/immich.yml'
+      - 'Dockerfile'
+      - 'go.*'
+      - 'internal/**'
+      - 'cmd/**'
+      - 'migrations/**'
+      - 'scripts/**'
+      - 'web/**'
+  pull_request:
+    paths:
+      - '.github/workflows/immich.yml'
+      - 'Dockerfile'
+      - 'go.*'
+      - 'internal/**'
+      - 'cmd/**'
+      - 'migrations/**'
+      - 'scripts/**'
+      - 'web/**'
+
+permissions:
+  contents: read
+
+jobs:
+  real-immich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build isolated PhotoDrop integration images
+        run: docker compose -f scripts/compose-immich-test.yml build
+      - name: Pull pinned Immich dependencies with bounded retries
+        run: |
+          for attempt in 1 2 3; do
+            if docker compose -f scripts/compose-immich-test.yml pull immich-server database redis; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep "$((attempt * 15))"
+            fi
+          done
+          exit 1
+      - name: Validate mixed export and real Immich lifecycle
+        run: node scripts/smoke-immich.mjs
+      - name: Diagnostic logs
+        if: failure()
+        run: docker compose -f scripts/compose-immich-test.yml logs --no-color photodrop immich-server
+      - name: Stop test services
+        if: always()
+        run: docker compose -f scripts/compose-immich-test.yml down

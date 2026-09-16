@@ -1,0 +1,109 @@
+# Test-only real Immich. Never included by the production compose.yml.
+# API/Compose contract pinned to immich-app/immich v3.2.1.
+name: photodrop-immich-test
+services:
+  objects:
+    image: photodrop:immich-build
+    build:
+      context: ..
+      target: backend
+    command: [sh, -ec, 'go build -o /tmp/immichtest ./scripts/immichtest && exec /tmp/immichtest']
+    ports:
+      - 127.0.0.1:8083:8083
+      - 127.0.0.1:18092:18092
+      - 127.0.0.1:18093:18093
+      - 127.0.0.1:2284:2284
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://localhost:18092/__test/requests && wget -q -O /dev/null http://localhost:2284/__test/control']
+      interval: 2s
+      timeout: 2s
+      retries: 60
+  photodrop:
+    image: photodrop:immich-test
+    build:
+      context: ..
+    network_mode: service:objects
+    depends_on:
+      objects:
+        condition: service_healthy
+      immich-server:
+        condition: service_healthy
+    environment:
+      PHOTODROP_LISTEN_ADDR: :8083
+      PHOTODROP_DATA_DIR: /data
+      PHOTODROP_ADMIN_PASSWORD: temporary-immich-test-admin-password
+      PHOTODROP_STORAGE_PROVIDER: '${PHOTODROP_TEST_PROVIDER:-local}'
+      PHOTODROP_STORAGE_BACKEND_KEY: '${PHOTODROP_TEST_BACKEND_KEY:-}'
+      PHOTODROP_S3_BACKENDS: s3-a,s3-b
+      PHOTODROP_S3_S3_A_BUCKET: photos-a
+      PHOTODROP_S3_S3_A_ENDPOINT: http://localhost:18092
+      PHOTODROP_S3_S3_A_PATH_STYLE: 'true'
+      PHOTODROP_S3_S3_A_ACCESS_KEY_ID: test-s3-access
+      PHOTODROP_S3_S3_A_SECRET_ACCESS_KEY: test-s3-secret-for-local-tests-only
+      PHOTODROP_S3_S3_B_BUCKET: photos-b
+      PHOTODROP_S3_S3_B_ENDPOINT: http://localhost:18093
+      PHOTODROP_S3_S3_B_PATH_STYLE: 'true'
+      PHOTODROP_S3_S3_B_ACCESS_KEY_ID: test-s3-access
+      PHOTODROP_S3_S3_B_SECRET_ACCESS_KEY: test-s3-secret-for-local-tests-only
+      PHOTODROP_IMMICH_TARGET: integration-test
+      PHOTODROP_IMMICH_INTEGRATION_TEST_URL: http://localhost:2284
+      PHOTODROP_IMMICH_INTEGRATION_TEST_API_KEY: '${PHOTODROP_TEST_IMMICH_KEY:-}'
+    volumes:
+      - photodrop-data:/data
+      - export-data:/export
+    stop_grace_period: 15s
+    healthcheck:
+      interval: 2s
+      timeout: 5s
+      start_period: 2s
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:v3.2.1
+    environment:
+      DB_HOSTNAME: database
+      DB_USERNAME: postgres
+      DB_PASSWORD: temporary-immich-test-database-password
+      DB_DATABASE_NAME: immich
+      REDIS_HOSTNAME: redis
+      IMMICH_CONFIG_FILE: /test-config.json
+    volumes:
+      - immich-media:/data
+      - ./immich-test-config.json:/test-config.json:ro
+    ports:
+      - 127.0.0.1:22830:2283
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      disable: false
+      interval: 5s
+      timeout: 5s
+      retries: 60
+  redis:
+    image: docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  database:
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: temporary-immich-test-database-password
+      POSTGRES_DB: immich
+      POSTGRES_INITDB_ARGS: --data-checksums
+    volumes:
+      - immich-database:/var/lib/postgresql/data
+    shm_size: 128mb
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres -d immich]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+volumes:
+  photodrop-data:
+  export-data:
+  immich-media:
+  immich-database:
