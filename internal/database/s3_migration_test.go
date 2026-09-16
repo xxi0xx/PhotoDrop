@@ -41,12 +41,12 @@ func TestGate3UpgradePreservesLocalAssets(t *testing.T) {
 	}
 	db.QueryRow("SELECT group_concat(checksum || applied_at, ',') FROM (SELECT checksum,applied_at FROM schema_migrations WHERE version<=4 ORDER BY version)").Scan(&after)
 	data, err := os.ReadFile(path)
-	if err != nil || string(data) != "bytes" || before != after || provider != "local" || target != "" || name != "original.png" || status != "ready" || size != 5 || expected != 0 || key != "e1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" || migrationCount(t, db) != 7 {
+	if err != nil || string(data) != "bytes" || before != after || provider != "local" || target != "" || name != "original.png" || status != "ready" || size != 5 || expected != 0 || key != "e1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" || migrationCount(t, db) != 8 {
 		t.Fatal("Gate 3 data or history changed")
 	}
 	db.Close()
 	db = openTestDB(t, dir)
-	if migrationCount(t, db) != 7 {
+	if migrationCount(t, db) != 8 {
 		t.Fatal("migration reapplied")
 	}
 }

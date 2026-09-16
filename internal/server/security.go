@@ -67,6 +67,7 @@ func (a *application) guarded(scope string, next http.HandlerFunc) http.HandlerF
 
 type maintainedHandler struct {
 	http.Handler
+	imports interface{ Run(context.Context) }
 	uploads *media.Service
 	logger  *slog.Logger
 }
