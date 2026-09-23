@@ -80,6 +80,13 @@ func (s *Service) CreateSession(ctx context.Context, publicID string) (Session, 
 	return s.CreateVerifiedSession(ctx, publicID, false)
 }
 func (s *Service) CreateVerifiedSession(ctx context.Context, publicID string, verified bool) (Session, error) {
+	return s.CreateAttributedSession(ctx, publicID, verified, "")
+}
+func (s *Service) CreateAttributedSession(ctx context.Context, publicID string, verified bool, name string) (Session, error) {
+	contributor, err := NormalizeContributor(name)
+	if err != nil {
+		return Session{}, err
+	}
 	e, err := s.openEvent(ctx, publicID)
 	if err != nil {
 		return Session{}, err
@@ -102,7 +109,7 @@ func (s *Service) CreateVerifiedSession(ctx context.Context, publicID string, ve
 	if verified {
 		verifiedAt = now
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO upload_sessions(id, event_id, created_at, updated_at, expires_at, max_assets, max_bytes, challenge_verified_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", id, e.ID, now, now, expires.Format(time.RFC3339Nano), s.security.SessionMaxAssets, s.security.SessionMaxBytes, verifiedAt); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO upload_sessions(id, event_id, created_at, updated_at, expires_at, max_assets, max_bytes, challenge_verified_at, contributor_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", id, e.ID, now, now, expires.Format(time.RFC3339Nano), s.security.SessionMaxAssets, s.security.SessionMaxBytes, verifiedAt, contributor); err != nil {
 		return Session{}, fmt.Errorf("create upload session: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -188,8 +195,8 @@ func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, dec
 	if err := reserve(ctx, tx, e.ID, sessionID, expected, q); err != nil {
 		return Asset{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO assets(id, event_id, upload_session_id, original_filename, storage_key, status, created_at, storage_backend_id, expected_size_bytes)
-		VALUES (?, ?, ?, ?, ?, 'pending', ?, 1, ?)`, id, e.ID, sessionID, filename, key, now, expected); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO assets(id, event_id, upload_session_id, original_filename, storage_key, status, created_at, storage_backend_id, expected_size_bytes, contributor_name)
+		VALUES (?, ?, ?, ?, ?, 'pending', ?, 1, ?, ?)`, id, e.ID, sessionID, filename, key, now, expected, q.contributor); err != nil {
 		return Asset{}, fmt.Errorf("create pending asset: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

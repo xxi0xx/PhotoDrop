@@ -121,9 +121,9 @@ func TestTurnstileSessionBoundaryHeadersAndBodies(t *testing.T) {
 				}
 			}
 			call("POST", path, `{"turnstile_token":"`+strings.Repeat("x", 5000)+`"}`, 413)
-			body := "{}"
+			body := `{"contributor_name":"Private José 王"}`
 			if enabled {
-				body = `{"turnstile_token":"valid-private-token"}`
+				body = `{"turnstile_token":"valid-private-token","contributor_name":"Private José 王"}`
 			}
 			w := call("POST", path, body, 201)
 			var result struct {
@@ -147,6 +147,17 @@ func TestTurnstileSessionBoundaryHeadersAndBodies(t *testing.T) {
 			}
 			if calls != before || (!enabled && calls != 0) {
 				t.Fatal("challenge per photo or disabled verifier called")
+			}
+			var attributed int
+			if err := db.QueryRow("SELECT count(*) FROM assets WHERE contributor_name='Private José 王'").Scan(&attributed); err != nil || attributed != 2 {
+				t.Fatal("verified batch lost attribution", err)
+			}
+			if strings.Contains(logs.String(), "Private José") {
+				t.Fatal("contributor name logged")
+			}
+			public := call("GET", "/api/public/events/"+e.PublicID, "", 200)
+			if strings.Contains(public.Body.String(), "contributor") || strings.Contains(public.Body.String(), "Private") {
+				t.Fatal("public attribution leak")
 			}
 			if enabled {
 				call("POST", path, body, 403)

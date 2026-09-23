@@ -13,7 +13,8 @@
     try {
       api = await loadTurnstile(); if (disposed) return;
       if (widget !== undefined) api.remove(widget);
-      widget = api.render(container, { sitekey: siteKey, action, size: 'flexible',
+      // Flexible has a 300px minimum; compact also fits the 320px guest card.
+      widget = api.render(container, { sitekey: siteKey, action, size: 'compact',
         callback: (token: string) => { error = ''; onToken(token); },
         'expired-callback': () => { onToken(''); error = 'Verification expired. Please verify again.'; },
         'error-callback': () => { onToken(''); error = 'Verification could not complete. Please try again.'; },

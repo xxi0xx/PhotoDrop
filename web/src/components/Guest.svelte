@@ -17,8 +17,8 @@
   {#if loading}<p role="status">Loading event…</p>
   {:else if missing}<h1>Event not found</h1><p>This link may be incorrect, or the event may have been removed.</p>
   {:else if error}<h1>Unable to load this event</h1><p class="error" role="alert">{error}</p><button class="secondary" onclick={load}>Try again</button>
-  {:else if event}<p class="eyebrow">You're invited</p><h1>{event.name}</h1>
-    {#if event.status === 'closed'}<p class="closed-notice">Photo sharing for this event is currently closed.</p>
+  {:else if event}<p class="eyebrow">Shared moments</p><h1>{event.name}</h1>
+    {#if event.status === 'closed'}<section class="closed-notice"><h2>Photo sharing is closed</h2><p>This event is no longer accepting photos.</p><p class="hint">If you expected it to be open, please contact the event host.</p></section>
     {:else}{#if event.event_date}<p class="guest-date">{displayDate(event.event_date)}</p>{/if}{#if event.description}<p class="guest-description">{event.description}</p>{/if}<Upload {publicID} maxFileSize={event.max_file_size!} challenge={event.challenge} />{/if}
   {/if}
 </main>

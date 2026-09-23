@@ -29,7 +29,11 @@ func TestSecurityBrowserFixture(t *testing.T) {
 	if os.Getenv("PHOTODROP_BROWSER_FIXTURE") != "1" {
 		t.Skip("explicit interactive browser fixture")
 	}
-	dir, err := filepath.Abs(filepath.Join("..", "..", ".tmp", "gate5-browser-data"))
+	fixtureDir := os.Getenv("PHOTODROP_BROWSER_FIXTURE_DIR")
+	if fixtureDir == "" {
+		fixtureDir = filepath.Join("..", "..", ".tmp", "gate5-browser-data")
+	}
+	dir, err := filepath.Abs(fixtureDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,14 +62,23 @@ func TestSecurityBrowserFixture(t *testing.T) {
 	var mu sync.RWMutex
 	var current *http.Server
 	var checks atomic.Int64
+	var localBodies, sessionRequests atomic.Int64
+	var failUpload, failComplete atomic.Bool
+	var delayMS atomic.Int64
 	var deterministicWidget bool
 	type settings struct {
 		Provider         string `json:"provider"`
 		Challenge        string `json:"challenge"`
 		Widget           string `json:"widget"`
 		RejectCompletion bool   `json:"reject_completion"`
+		FailNextUpload   bool   `json:"fail_next_upload"`
+		FailNextComplete bool   `json:"fail_next_complete"`
+		DelayMS          int64  `json:"delay_ms"`
 	}
 	set := func(value settings) error {
+		failUpload.Store(value.FailNextUpload)
+		failComplete.Store(value.FailNextComplete)
+		delayMS.Store(max(0, min(10000, value.DelayMS)))
 		deterministicWidget = value.Widget == "deterministic"
 		for _, objects := range objectStores {
 			status := 0
@@ -113,6 +126,9 @@ func TestSecurityBrowserFixture(t *testing.T) {
 			fmt.Fprint(w, `window.turnstile = {
 render(element, options) {
   const id = crypto.randomUUID(); element.id = id;
+  element.dataset.widgetSize = options.size;
+  element.style.width = options.size === 'compact' ? '150px' : '300px';
+  element.style.minHeight = options.size === 'compact' ? '140px' : '65px';
   const button = document.createElement('button'); button.type = 'button';
   button.textContent = 'Complete test verification';
   button.onclick = () => { button.textContent = 'Test verification complete'; button.disabled = true; options.callback('XXXX.DUMMY.TOKEN.XXXX'); };
@@ -162,7 +178,15 @@ render(element, options) {
 		if r.URL.Path == "/__test/state" && r.Method == "GET" {
 			var count, ready, bytes, reserved int64
 			db.QueryRow("SELECT count(*),COALESCE(sum(status='ready'),0),COALESCE(sum(CASE WHEN status='ready' THEN size_bytes ELSE 0 END),0),COALESCE(sum(CASE WHEN status='pending' THEN expected_size_bytes ELSE 0 END),0) FROM assets").Scan(&count, &ready, &bytes, &reserved)
-			writeJSON(w, 200, map[string]any{"verification_calls": checks.Load(), "assets": count, "ready": ready, "bytes": bytes, "reserved": reserved})
+			var puts int
+			for _, store := range objectStores {
+				for _, request := range store.Requests() {
+					if request.Method == "PUT" {
+						puts++
+					}
+				}
+			}
+			writeJSON(w, 200, map[string]any{"verification_calls": checks.Load(), "assets": count, "ready": ready, "bytes": bytes, "reserved": reserved, "local_bodies": localBodies.Load(), "session_requests": sessionRequests.Load(), "direct_puts": puts})
 			return
 		}
 		if r.URL.Path == "/__test/stop" && r.Method == "POST" {
@@ -172,6 +196,27 @@ render(element, options) {
 		}
 		mu.RLock()
 		defer mu.RUnlock()
+		if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/api/public/events/") {
+			if strings.HasSuffix(r.URL.Path, "/upload-sessions") {
+				sessionRequests.Add(1)
+			}
+			isUpload := strings.HasSuffix(r.URL.Path, "/assets")
+			isComplete := strings.HasSuffix(r.URL.Path, "/complete")
+			if isUpload {
+				localBodies.Add(1)
+			}
+			if isUpload || isComplete {
+				select {
+				case <-r.Context().Done():
+					return
+				case <-time.After(time.Duration(delayMS.Load()) * time.Millisecond):
+				}
+				if (isUpload && failUpload.CompareAndSwap(true, false)) || (isComplete && failComplete.CompareAndSwap(true, false)) {
+					apiError(w, 503, "storage_unavailable", "Photo storage is temporarily unavailable. Please try again later.", nil)
+					return
+				}
+			}
+		}
 		if deterministicWidget && r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/e/") {
 			response := httptest.NewRecorder()
 			current.Handler.ServeHTTP(response, r)

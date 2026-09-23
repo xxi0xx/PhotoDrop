@@ -104,6 +104,8 @@ func (a *application) fail(w http.ResponseWriter, err error) {
 	var validation *events.ValidationError
 	var tooLarge *http.MaxBytesError
 	switch {
+	case errors.Is(err, media.ErrContributor):
+		apiError(w, 422, "contributor_name", media.ErrContributor.Error(), map[string]string{"contributor_name": media.ErrContributor.Error()})
 	case errors.Is(err, media.ErrExpired):
 		a.logger.Info("upload session expired")
 		apiError(w, 409, "session_expired", media.ErrExpired.Error(), nil)
@@ -307,9 +309,10 @@ func (a *application) logout(w http.ResponseWriter, r *http.Request, _ auth.Sess
 
 type adminEvent struct {
 	events.Event
-	Status    string      `json:"status"`
-	PublicURL string      `json:"public_url"`
-	Media     media.Stats `json:"media"`
+	Status       string              `json:"status"`
+	PublicURL    string              `json:"public_url"`
+	Media        media.Stats         `json:"media"`
+	Contributors []media.Contributor `json:"contributors,omitempty"`
 }
 
 func (a *application) adminEvent(e events.Event) adminEvent {

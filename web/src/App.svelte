@@ -15,7 +15,7 @@
       <img class="project-mark" src="/favicon.svg" width="64" height="64" alt="" />
       <p class="eyebrow">A place for shared moments</p><h1>PhotoDrop</h1>
       <p class="description">Self-hosted event photo collection.</p>
-      <p class="status"><span class="status-dot" aria-hidden="true"></span>Application foundation is running.</p>
+      <p class="status"><span class="status-dot" aria-hidden="true"></span>Your event. Everyone’s memories.</p>
       <p class="note">Create an event and invite guests to share their photos.</p>
       <a class="button" href="/admin">Manage events</a>
     </main>

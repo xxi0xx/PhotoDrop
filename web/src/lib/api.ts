@@ -1,3 +1,4 @@
+import { retryAfterAt } from './upload-ux';
 export type Session = { csrf_token: string; expires_at: string };
 export type EventRecord = {
   id: number; public_id: string; name: string; description: string;
@@ -5,6 +6,7 @@ export type EventRecord = {
   created_at: string; updated_at: string; status: 'open' | 'disabled' | 'expired'; public_url: string;
   deleting: boolean; max_assets: number | null; max_bytes: number | null;
   media: { photo_count: number; storage_bytes: number; pending_count?: number; reserved_bytes?: number };
+  contributors?: { name: string | null; photo_count: number }[];
 };
 export type Challenge = { site_key: string; action: string };
 export type GuestEvent = { name: string; status: 'open' | 'closed'; description?: string; event_date?: string; max_file_size?: number; challenge?: Challenge };
@@ -15,7 +17,7 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 export class APIError extends Error {
-  constructor(message: string, public status: number, public fields: Record<string, string> = {}, public code = '') { super(message); }
+  constructor(message: string, public status: number, public fields: Record<string, string> = {}, public code = '', public retryAt = 0) { super(message); }
 }
 // Only the CSRF token is held in memory. Authentication uses the HttpOnly cookie.
 let csrfToken = '';
@@ -27,7 +29,7 @@ export async function request<T>(path: string, method = 'GET', data?: unknown): 
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     if (response.status === 401 && window.location.pathname.startsWith('/admin') && window.location.pathname !== '/admin/login') window.location.assign('/admin/login');
-    throw new APIError(body?.error?.message ?? 'Unable to complete the request. Please try again.', response.status, body?.error?.fields, body?.error?.code);
+    throw new APIError(body?.error?.message ?? 'Unable to complete the request. Please try again.', response.status, body?.error?.fields, body?.error?.code, retryAfterAt(response.headers.get('Retry-After')));
   }
   return response.status === 204 ? undefined as T : response.json();
 }

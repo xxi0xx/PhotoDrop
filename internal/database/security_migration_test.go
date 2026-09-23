@@ -39,7 +39,7 @@ func TestGate4BackendPatchUpgradeExpiresLegacyGrants(t *testing.T) {
 	}
 	db.QueryRow("SELECT status,size_bytes,storage_backend_id FROM assets WHERE id='old-asset'").Scan(&status, &size, &backend)
 	db.QueryRow("SELECT max_assets,max_bytes FROM events WHERE id=1").Scan(&maxAssets, &maxBytes)
-	if before != after || migrationCount(t, db) != 8 || expiry != "1970-01-01T00:00:00Z" || status != "ready" || size != 68 || backend != 1 || maxAssets != nil || maxBytes != nil {
+	if before != after || migrationCount(t, db) != 9 || expiry != "1970-01-01T00:00:00Z" || status != "ready" || size != 68 || backend != 1 || maxAssets != nil || maxBytes != nil {
 		t.Fatal("upgrade changed ready assets/history or left legacy grant live")
 	}
 }

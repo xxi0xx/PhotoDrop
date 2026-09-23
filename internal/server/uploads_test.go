@@ -72,7 +72,13 @@ func TestAnonymousUploadHTTP(t *testing.T) {
 		return w
 	}
 	sessionPath := "/api/public/events/" + e.PublicID + "/upload-sessions"
-	w := call(sessionPath, strings.NewReader("{}"), "", "application/json", 2, 201)
+	for _, name := range []string{strings.Repeat("界", 101), "a\x00b", "a\nb"} {
+		body, _ := json.Marshal(map[string]string{"contributor_name": name})
+		call(sessionPath, bytes.NewReader(body), "", "application/json", int64(len(body)), 422)
+	}
+	const contributor = "<img src=x onerror=alert(1)> José"
+	body, _ := json.Marshal(map[string]string{"contributor_name": contributor})
+	w := call(sessionPath, bytes.NewReader(body), "", "application/json", int64(len(body)), 201)
 	var session struct {
 		UploadSession media.Session `json:"upload_session"`
 	}
@@ -80,6 +86,10 @@ func TestAnonymousUploadHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := sessionPath + "/" + session.UploadSession.ID + "/assets"
+	var attribution string
+	if err := db.QueryRow("SELECT contributor_name FROM upload_sessions WHERE id=?", session.UploadSession.ID).Scan(&attribution); err != nil || attribution != contributor {
+		t.Fatal("session attribution", err)
+	}
 	data := testutil.Images()["image/png"]
 	for _, filename := range []string{"../../etc/passwd", `C:\temp\file.jpg`, "<script>alert(1)</script>.jpg"} {
 		w = call(path, bytes.NewReader(data), filename, "image/png", -1, 201)
@@ -92,7 +102,7 @@ func TestAnonymousUploadHTTP(t *testing.T) {
 		if response.Asset.Filename != filename || response.Asset.Status != "ready" || response.Asset.Size != int64(len(data)) {
 			t.Fatal("guest metadata mismatch")
 		}
-		for _, private := range []string{"event_id", "storage_key", "upload_session_id", "created_at", "completed_at"} {
+		for _, private := range []string{"event_id", "storage_key", "upload_session_id", "created_at", "completed_at", "contributor_name"} {
 			if strings.Contains(w.Body.String(), `"`+private+`"`) {
 				t.Fatalf("public response exposed %s", private)
 			}
