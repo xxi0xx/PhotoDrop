@@ -11,8 +11,8 @@
 <main class="login-panel">
   <p class="eyebrow">Administration</p><h1>PhotoDrop Admin</h1><p class="muted">Sign in to manage your events.</p>
   <form onsubmit={signIn}>
-    <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required bind:value={password} disabled={busy} />
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
+    <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required bind:value={password} disabled={busy} aria-invalid={!!error} aria-describedby={error ? 'login-error' : undefined} />
+    {#if error}<p id="login-error" class="error" role="alert">{error}</p>{/if}
     <button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign In'}</button>
   </form>
 </main>

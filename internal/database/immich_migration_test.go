@@ -55,7 +55,7 @@ func TestGate5UpgradePreservesMediaAndHistory(t *testing.T) {
 		if err := db.QueryRow("SELECT status,size_bytes,storage_backend_id FROM assets WHERE id='asset'").Scan(&state, &size, &backend); err != nil {
 			t.Fatal(err)
 		}
-		if before != after || count != 8 || maxAssets != 20 || state != "ready" || size != 77 || backend != 1 {
+		if before != after || count != 9 || maxAssets != 20 || state != "ready" || size != 77 || backend != 1 {
 			t.Fatal("migration changed Gate 5 data or history")
 		}
 		db.Close()

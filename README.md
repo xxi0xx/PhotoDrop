@@ -1,16 +1,17 @@
 # PhotoDrop
 
-PhotoDrop is a self-hosted event photo collection app. **Gate 6 adds portable
-event export and an optional native Immich integration to local and
-S3-compatible direct uploads, including historical storage backends:**
-guests select photos, see per-file and overall
-progress, and retry failed files. One administrator manages events and sees
-completed photo counts and storage totals. The Go/Svelte/SQLite foundation,
+PhotoDrop is a self-hosted event photo collection app. **Gate 7 adds local event
+QR codes, optional contributor names, and a mobile guest upload experience**
+to local/S3 uploads, portable export, and optional native Immich integration.
+Guests select photos, see progress, retry failed photos, and add another batch.
+One administrator manages events and sees completed counts, storage totals,
+and optional contributor attribution. The Go/Svelte/SQLite foundation,
 authentication, event links, and one-container deployment remain intact.
 
-**Video-specific workflows, multipart/resumable guest uploads, QR generation,
-public downloads, galleries, thumbnails, contributor names, and Gate 7 UX
-features are not implemented.**
+**Video-specific workflows, multipart/resumable guest uploads, public downloads,
+galleries, thumbnails, guest accounts, and Gate 8 release infrastructure are not
+implemented.** See the [guest and event-sharing guide](docs/production-ux.md)
+and [Gate 7 validation record](docs/gate-7-validation.md).
 
 Export an event with `photodrop export --event 1 --output /export/wedding`.
 The [export and Immich guide](docs/export-immich.md) covers manifests, safe filenames,

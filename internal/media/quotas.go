@@ -14,12 +14,15 @@ var ErrSessionQuota = errors.New("This upload session has reached its photo or s
 
 func (s *Service) ConfigureSecurity(c config.Security) { s.security = c.Defaults() }
 
-type quotaSession struct{ maxAssets, maxBytes int64 }
+type quotaSession struct {
+	maxAssets, maxBytes int64
+	contributor         *string
+}
 
 func checkSession(ctx context.Context, tx *sql.Tx, eventID int64, sessionID string) (quotaSession, error) {
 	var q quotaSession
 	var expires string
-	err := tx.QueryRowContext(ctx, "SELECT expires_at,max_assets,max_bytes FROM upload_sessions WHERE id=? AND event_id=?", sessionID, eventID).Scan(&expires, &q.maxAssets, &q.maxBytes)
+	err := tx.QueryRowContext(ctx, "SELECT expires_at,max_assets,max_bytes,contributor_name FROM upload_sessions WHERE id=? AND event_id=?", sessionID, eventID).Scan(&expires, &q.maxAssets, &q.maxBytes, &q.contributor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return q, ErrSession
 	}

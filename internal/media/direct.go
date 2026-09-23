@@ -130,8 +130,8 @@ func (s *Service) Prepare(ctx context.Context, publicID, sessionID string, p Pre
 		if err := reserve(ctx, tx, e.ID, sessionID, p.Size, q); err != nil {
 			return "", err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO assets(id,event_id,upload_session_id,original_filename,storage_key,status,created_at,storage_provider,storage_target,expected_size_bytes,expected_mime_type,client_request_id,storage_backend_id)
-   VALUES(?,?,?,?,?,'pending',?,'s3',?,?,?,?,?)`, id, e.ID, sessionID, p.Filename, direct.Key(e.ID, id), timestamp(), direct.Target(), p.Size, p.ContentType, p.RequestID, active.ID)
+		_, err = tx.ExecContext(ctx, `INSERT INTO assets(id,event_id,upload_session_id,original_filename,storage_key,status,created_at,storage_provider,storage_target,expected_size_bytes,expected_mime_type,client_request_id,storage_backend_id,contributor_name)
+   VALUES(?,?,?,?,?,'pending',?,'s3',?,?,?,?,?,?)`, id, e.ID, sessionID, p.Filename, direct.Key(e.ID, id), timestamp(), direct.Target(), p.Size, p.ContentType, p.RequestID, active.ID, q.contributor)
 		if err != nil {
 			return "", err
 		}

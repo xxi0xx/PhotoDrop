@@ -23,6 +23,11 @@ func (a *application) writeAdminEvent(w http.ResponseWriter, r *http.Request, e 
 	}
 	item := a.adminEvent(e)
 	item.Media = stats[e.ID]
+	item.Contributors, err = a.media.Contributors(r.Context(), e.ID)
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
 	writeJSON(w, 200, map[string]any{"event": item})
 }
 
@@ -33,12 +38,17 @@ func (a *application) createUploadSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var input struct {
-		Token string `json:"turnstile_token"`
+		Token       string `json:"turnstile_token"`
+		Contributor string `json:"contributor_name"`
 	}
 	if !decodeJSON(w, r, &input, 4096) {
 		return
 	}
 	verified := false
+	if _, err := media.NormalizeContributor(input.Contributor); err != nil {
+		a.fail(w, err)
+		return
+	}
 	if a.security.TurnstileSiteKey != "" {
 		if input.Token == "" || len(input.Token) > 2048 {
 			a.fail(w, abuse.ErrChallenge)
@@ -77,7 +87,7 @@ func (a *application) createUploadSession(w http.ResponseWriter, r *http.Request
 		}
 		verified = true
 	}
-	session, err := a.media.CreateVerifiedSession(r.Context(), r.PathValue("public_id"), verified)
+	session, err := a.media.CreateAttributedSession(r.Context(), r.PathValue("public_id"), verified, input.Contributor)
 	if err != nil {
 		a.fail(w, err)
 		return

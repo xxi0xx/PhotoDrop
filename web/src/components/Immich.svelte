@@ -48,7 +48,7 @@
     finally { busy = false; }
   }
 </script>
-<section class="link-panel" aria-labelledby="immich-heading">
+<section class="section-card" aria-labelledby="immich-heading">
   <h2 id="immich-heading">Immich</h2>
   <p class="hint">Send independent copies to Immich. Deleting this event leaves the Immich album and photos untouched. Cancel an active import before deleting the event.</p>
   {#if error || pollError}<p class="error" role="alert">{error || pollError}</p>{/if}
@@ -63,12 +63,13 @@
       <div class="actions"><button class="secondary" disabled={busy || !status.target.available} onclick={testConnection}>{testing ? 'Testing connection…' : 'Test Immich connection'}</button></div>
       {#if connection}<p role="status">{connection}</p>{/if}
       <div class="field"><label for="immich-album">Album name</label><input id="immich-album" maxlength="200" bind:value={albumName} disabled={!!status.album_id || busy || view?.active} /><p class="hint">Choose a name before the first import. Later imports use the same album, even if you rename it in Immich.</p></div>
-      <p class="media-stats">{status.total} photos total · {status.imported} imported · {status.duplicate} duplicates accounted for · {status.failed} failed · {status.new + status.pending} not yet imported</p>
+      <dl class="stat-grid"><div><dt>Imported</dt><dd>{status.imported + status.duplicate}</dd></div><div><dt>Not yet imported</dt><dd>{status.new + status.pending}</dd></div><div><dt>Failed</dt><dd>{status.failed}</dd></div></dl>
+      {#if status.duplicate}<p class="hint">{status.duplicate} already existed in Immich and are accounted for.</p>{/if}
       {#if view}<p role="status">{view.label} · {view.accounted} of {status.total} accounted for</p>{/if}
       {#if status.job?.error}<p class="error">{status.job.error}</p>{/if}
       <div class="actions">
-        <button disabled={!view?.canSend} onclick={() => send('new')}>Send {view?.sendCount ?? 0} photos to Immich</button>
-        <button class="secondary" disabled={!view?.canRetry} onclick={() => send('retry')}>Retry {status.failed} failed photos</button>
+        <button disabled={!view?.canSend} onclick={() => send('new')}>Send {view?.sendCount ?? 0} {view?.sendCount === 1 ? 'photo' : 'photos'} to Immich</button>
+        <button class="secondary" disabled={!view?.canRetry} onclick={() => send('retry')}>Retry {status.failed} failed {status.failed === 1 ? 'photo' : 'photos'}</button>
         {#if view?.active}<button class="secondary" disabled={busy || status.job?.cancel_requested} onclick={cancel}>Cancel import</button>{/if}
       </div>
     {/if}
