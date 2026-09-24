@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a reproducible operational or application problem, without secrets.
+body:
+  - type: markdown
+    attributes:
+      value: 'For vulnerabilities use SECURITY.md. Never include passwords, API keys, tokens, cookies, presigned URLs or guest photos.'
+  - type: input
+    id: version
+    attributes:
+      label: PhotoDrop version
+      description: Output of photodrop version and image tag/digest.
+    validations:
+      required: true
+  - type: textarea
+    id: deployment
+    attributes:
+      label: Deployment
+      description: OS/architecture, Docker/Compose versions, local or S3 storage, reverse proxy, relevant integrations. No credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction and expected/actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted logs
+      description: Remove credentials, tokens, cookies, signed URLs and personal data before posting.

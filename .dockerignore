@@ -7,4 +7,11 @@ web/node_modules
 web/dist
 .env
 .env.backends
+.env.*
+!.env.example
+!.env.backends.example
+output
+.playwright-cli
+release-test.tar
+release-oci
 *.log

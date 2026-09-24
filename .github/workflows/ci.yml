@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   push:
   pull_request:
 
@@ -11,13 +12,13 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
@@ -34,9 +35,13 @@ jobs:
         run: npm test --prefix web
       - name: Build frontend for embedding
         run: npm run build --prefix web
+      - name: Validate release policy, injected version, and documentation
+        run: |
+          node --test scripts/release.test.mjs
+          node scripts/check-docs.mjs
       - name: Check Go formatting
         run: |
-          files=$(gofmt -l cmd internal migrations web/embed.go)
+          files=$(gofmt -l cmd internal migrations scripts web/embed.go)
           if [ -n "$files" ]; then
             printf '%s\n' "$files"
             exit 1
@@ -61,3 +66,64 @@ jobs:
         run: |
           docker compose down
           docker compose -f scripts/compose-backends-test.yml down
+  release-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Upgrade and restore populated Gate 7 data in disposable volumes
+        run: node scripts/smoke-release.mjs
+      - name: Fresh documented local and S3 installations
+        run: node scripts/smoke-fresh.mjs
+  release-build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Build release candidate locally, without registry credentials
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          push: false
+          tags: photodrop:release-test
+          build-args: |
+            VERSION=1.0.0-rc.test
+            REVISION=${{ github.sha }}
+      - name: Inspect and run release candidate
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: sh scripts/verify-image.sh photodrop:release-test 1.0.0-rc.test "$GITHUB_SHA" "linux/$ARCH"
+      - name: Export attested OCI candidate without publishing
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          push: false
+          outputs: type=oci,dest=release-test.tar
+          tags: photodrop:release-oci-test
+          build-args: |
+            VERSION=1.0.0-rc.test
+            REVISION=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+      - name: Inspect local OCI metadata, SBOM and provenance
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir release-oci
+          tar -xf release-test.tar -C release-oci
+          node scripts/verify-oci.mjs release-oci "$ARCH" 1.0.0-rc.test "$GITHUB_SHA"

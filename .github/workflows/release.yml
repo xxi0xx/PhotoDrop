@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: photodrop-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      image: ${{ steps.plan.outputs.image }}
+      immutable: ${{ steps.plan.outputs.immutable }}
+      aliases: ${{ steps.plan.outputs.aliases }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - id: plan
+        run: node scripts/release.mjs
+      - name: Require merged main ancestry and selected license
+        run: |
+          git merge-base --is-ancestor HEAD origin/main
+          test -s LICENSE || { echo 'Owner must select a license before publishing'; exit 1; }
+  tests:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+  immich:
+    needs: validate
+    uses: ./.github/workflows/immich.yml
+  publish:
+    needs: [validate, tests, immich]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      IMAGE: ${{ needs.validate.outputs.image }}
+      VERSION: ${{ needs.validate.outputs.version }}
+      IMMUTABLE: ${{ needs.validate.outputs.immutable }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse overwrite of version tag
+        shell: bash
+        run: |
+          if docker buildx imagetools inspect "$IMMUTABLE" > /dev/null 2> registry-error; then
+            echo 'Version image already exists; never overwrite a release'; exit 1
+          fi
+          grep -qiE 'manifest unknown|not found' registry-error || { cat registry-error; exit 1; }
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        id: build
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMMUTABLE }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            REVISION=${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+      - name: Verify published artifacts before aliases or GitHub Release
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker buildx imagetools inspect "$IMAGE@$DIGEST" --raw > manifest.json
+          node scripts/verify-manifest.mjs manifest.json
+          docker buildx imagetools inspect "$IMAGE@$DIGEST" --format '{{json .SBOM}}' > sbom.json
+          docker buildx imagetools inspect "$IMAGE@$DIGEST" --format '{{json .Provenance}}' > provenance.json
+          node scripts/verify-attestations.mjs sbom.json provenance.json
+          for platform in linux/amd64 linux/arm64; do
+            docker pull --platform "$platform" "$IMAGE@$DIGEST"
+            sh scripts/verify-image.sh "$IMAGE@$DIGEST" "$VERSION" "$GITHUB_SHA" "$platform"
+          done
+      - name: Promote verified aliases
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ALIASES: ${{ needs.validate.outputs.aliases }}
+        run: |
+          mapfile -t aliases < <(jq -r '.[]' <<< "$ALIASES")
+          for alias in "${aliases[@]}"; do
+            docker buildx imagetools create --tag "$alias" "$IMAGE@$DIGEST"
+          done
+      - name: Create release only after image verification
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          printf 'Container: `%s@%s`\n\n' "$IMAGE" "$DIGEST" > release-notes.md
+          cat CHANGELOG.md >> release-notes.md
+          args=()
+          if [ "$PRERELEASE" = true ]; then args+=(--prerelease --latest=false); fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "PhotoDrop $VERSION" --notes-file release-notes.md "${args[@]}"

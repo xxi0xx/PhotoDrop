@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"photodrop/internal/buildinfo"
 	"photodrop/internal/config"
 	"photodrop/internal/database"
 	"photodrop/internal/server"
@@ -28,11 +29,15 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, logger *slog.Logger) error {
+	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
+		fmt.Println(buildinfo.String())
+		return nil
+	}
 	if len(args) > 0 && args[0] == "export" {
 		return exportEvent(ctx, args[1:], logger)
 	}
 	if len(args) != 0 && !(len(args) == 1 && args[0] == "healthcheck") {
-		return fmt.Errorf("usage: photodrop [healthcheck | export --event ID --output DIRECTORY]")
+		return fmt.Errorf("usage: photodrop [version | healthcheck | export --event ID --output DIRECTORY]")
 	}
 	cfg, err := config.Load()
 	if err != nil {

@@ -5,4 +5,11 @@
 /.tmp/
 .env
 .env.backends
+.env.*
+!.env.example
+!.env.backends.example
+/.playwright-cli/
+/output/
+/release-test.tar
+/release-oci/
 *.log

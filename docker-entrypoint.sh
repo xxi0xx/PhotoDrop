@@ -8,6 +8,7 @@ if [ "$(id -u)" = "0" ]; then
     data_dir=${PHOTODROP_DATA_DIR:-/data}
     mkdir -p -- "$data_dir"
     chown photodrop:photodrop -- "$data_dir"
+    chmod 0700 -- "$data_dir"
     exec su-exec photodrop:photodrop "$@"
 fi
 
