@@ -18,7 +18,7 @@ ARG VERSION=dev
 ARG REVISION
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -buildvcs=false -ldflags="-s -w -X photodrop/internal/buildinfo.Version=${VERSION} -X photodrop/internal/buildinfo.Commit=${REVISION}" -o /out/photodrop ./cmd/photodrop
 
-FROM alpine:3.23 AS runtime
+FROM alpine:3.24 AS runtime
 ARG VERSION=dev
 ARG REVISION
 LABEL org.opencontainers.image.source="https://github.com/xxi0xx/PhotoDrop" \
