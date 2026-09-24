@@ -147,8 +147,9 @@ content type where supplied, and GETs `bytes=0-511` with the HEAD ETag in
 `If-Match`. Missing/inconsistent range metadata, changed objects, provider
 errors, wrong sizes, and disguised non-images cannot become ready. Reads are
 bounded even if a provider ignores Range. Gate 3's JPEG/PNG/WebP/GIF/HEIC/HEIF
-sniffing determines the final trusted MIME type; full images are never decoded
-or downloaded by PhotoDrop. Only the prefix crosses its server.
+sniffing determines the final trusted MIME type. During upload finalization,
+PhotoDrop reads only that prefix and does not decode the full image. Later export
+and Immich operations stream full ready originals from storage through PhotoDrop.
 
 Wrong-size or invalid-image objects are deleted, but the pending asset and its
 immutable expected metadata remain for retry. If verification or its final
