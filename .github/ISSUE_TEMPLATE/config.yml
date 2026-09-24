@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security reporting policy
+    url: https://github.com/xxi0xx/PhotoDrop/blob/main/SECURITY.md
+    about: Do not disclose vulnerability details in public issues.

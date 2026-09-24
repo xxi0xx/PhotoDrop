@@ -179,5 +179,6 @@ S3 bytes reach storage before final verification: malicious clients with a valid
 presign can temporarily exceed declared bytes or upload invalid content. Use
 provider cost controls and carefully scoped credentials; application quotas bound
 accepted reservations, not all pre-verification provider traffic. File sniffing is
-not antivirus or image decoding. No gallery, download, export, Immich, QR, video,
-multipart, contributor identity, or other Gate 6 functionality is provided.
+not antivirus or image decoding. There is no public gallery/download, video or
+resumable multipart upload. Export, Immich, QR codes and optional unverified
+contributor labels are described in the current operating guides.

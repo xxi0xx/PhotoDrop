@@ -1,5 +1,6 @@
 services:
   photodrop:
+    image: "${PHOTODROP_IMAGE:-photodrop:local}"
     build: .
     ports:
       - "8080:8080"

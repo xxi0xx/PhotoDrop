@@ -270,8 +270,9 @@ to upload the resulting `photos/` directory. Follow that CLI version's setup and
 permission requirements. PhotoDrop does not invoke it or include Node.js in its
 production container. Export has no Immich dependency.
 
-There is no video-specific optimization, gallery/public download, media migration,
-EXIF processing, QR generation, branding change, or Gate 7 functionality. Completed
+There is no video support, gallery/public download, media migration or EXIF
+processing. QR sharing and optional contributor names are available in the
+[guest UX](production-ux.md). Completed
 imports are an accounting record, not a continuous synchronization/audit of
 externally deleted Immich media. Restoring a different Immich deployment requires
 a new target key. S3 credentials must allow reading historical source objects.
