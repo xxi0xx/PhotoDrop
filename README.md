@@ -8,8 +8,8 @@ PhotoDrop runs as one Go container with an embedded Svelte interface and SQLite.
 It stores images locally or sends browser uploads directly to private S3-compatible
 storage. Optional Immich integration copies completed photos through its API.
 
-**Release status:** preparing the first stable `v1.0.0`; it has not been published
-by this preparation change. Licensed under Apache-2.0. Owner-completed live R2
+**Release status:** `v1.0.0` is ready for the owner's release tag; publication
+is triggered by that tag. Licensed under Apache-2.0. Owner-completed live R2
 and production Turnstile validation passed; private vulnerability reporting is enabled.
 See [release readiness](docs/gate-8-validation.md) for the dated validation record.
 
