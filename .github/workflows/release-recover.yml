@@ -1,0 +1,62 @@
+name: Recover release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to recover (for example v1.0.0)
+        required: true
+        type: string
+      expected_digest:
+        description: Confirm the already-published immutable OCI index sha256 digest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Serialize normal publication and recovery in this repository.
+concurrency:
+  group: photodrop-release
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate remote tag, ancestry, license and existing immutable artifact
+        id: plan
+        env:
+          TAG: ${{ inputs.tag }}
+          EXPECTED_DIGEST: ${{ inputs.expected_digest }}
+        run: node scripts/release-recover.mjs prepare "$TAG" "$EXPECTED_DIGEST" "$RUNNER_TEMP/recovery.json"
+      - name: Verify published artifacts and both child-digest runtimes
+        env:
+          IMAGE: ${{ steps.plan.outputs.image }}
+          DIGEST: ${{ steps.plan.outputs.digest }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          TAG_COMMIT: ${{ steps.plan.outputs.commit }}
+        run: node scripts/verify-published.mjs "$IMAGE" "$DIGEST" "$VERSION" "$TAG_COMMIT"
+      - name: Complete publication without replacing conflicting state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/release-recover.mjs finish "$RUNNER_TEMP/recovery.json"

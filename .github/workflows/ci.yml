@@ -38,6 +38,7 @@ jobs:
       - name: Validate release policy, injected version, and documentation
         run: |
           node --test scripts/release.test.mjs
+          node --test scripts/release-recovery.test.mjs
           node scripts/check-docs.mjs
       - name: Check Go formatting
         run: |

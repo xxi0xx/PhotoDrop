@@ -73,15 +73,15 @@ test('workflow credentials and action pins stay constrained', () => {
     for (const [,action] of content.matchAll(/uses:\s+([^\s#]+)/g)) {
       if (!action.startsWith('./')) assert.match(action, /^[\w.-]+\/[\w./-]+@[a-f0-9]{40}$/);
     }
-    if (file !== 'release.yml') assert.ok(!/\bwrite\b/.test(content),`${file} has write permissions`);
+    if (!['release.yml','release-recover.yml'].includes(file)) assert.ok(!/\bwrite\b/.test(content),`${file} has write permissions`);
   }
 });
 test('artifact inspection rejects missing architectures, SBOM and provenance', () => {
   const dir=mkdtempSync(join(tmpdir(),'photodrop-attestations-'));
-  const manifest={manifests:[]}, sbom={}, provenance={};
+  const manifest={schemaVersion:2, mediaType:'application/vnd.oci.image.index.v1+json', manifests:[]}, sbom={}, provenance={};
   for (const arch of ['amd64','arm64']) {
-    const digest=`sha256:${arch}`;
-    manifest.manifests.push({digest,platform:{os:'linux',architecture:arch}},{annotations:{'vnd.docker.reference.type':'attestation-manifest','vnd.docker.reference.digest':digest}});
+    const digest=`sha256:${(arch === 'amd64' ? 'a' : 'b').repeat(64)}`;
+    manifest.manifests.push({digest,mediaType:'application/vnd.oci.image.manifest.v1+json',platform:{os:'linux',architecture:arch}},{digest:`sha256:${'c'.repeat(64)}`,annotations:{'vnd.docker.reference.type':'attestation-manifest','vnd.docker.reference.digest':digest}});
     sbom[`linux/${arch}`]={SPDX:{spdxVersion:'SPDX-2.3',packages:[{name:'photodrop'}]}};
     provenance[`linux/${arch}`]={SLSA:{buildType:'https://mobyproject.org/buildkit@v1'}};
   }

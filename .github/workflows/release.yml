@@ -84,16 +84,7 @@ jobs:
       - name: Verify published artifacts before aliases or GitHub Release
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          docker buildx imagetools inspect "$IMAGE@$DIGEST" --raw > manifest.json
-          node scripts/verify-manifest.mjs manifest.json
-          docker buildx imagetools inspect "$IMAGE@$DIGEST" --format '{{json .SBOM}}' > sbom.json
-          docker buildx imagetools inspect "$IMAGE@$DIGEST" --format '{{json .Provenance}}' > provenance.json
-          node scripts/verify-attestations.mjs sbom.json provenance.json
-          for platform in linux/amd64 linux/arm64; do
-            docker pull --platform "$platform" "$IMAGE@$DIGEST"
-            sh scripts/verify-image.sh "$IMAGE@$DIGEST" "$VERSION" "$GITHUB_SHA" "$platform"
-          done
+        run: node scripts/verify-published.mjs "$IMAGE" "$DIGEST" "$VERSION" "$GITHUB_SHA"
       - name: Promote verified aliases
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
