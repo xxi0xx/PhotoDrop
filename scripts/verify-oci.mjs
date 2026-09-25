@@ -28,6 +28,7 @@ const labels=image.config.config.Labels;
 assert.equal(labels['org.opencontainers.image.version'],version);
 assert.equal(labels['org.opencontainers.image.revision'],revision);
 assert.equal(labels['org.opencontainers.image.source'],'https://github.com/xxi0xx/PhotoDrop');
+assert.equal(labels['org.opencontainers.image.licenses'],'Apache-2.0');
 const records=attestations.filter(a=>a.descriptor.annotations['vnd.docker.reference.digest']===image.descriptor.digest).flatMap(a=>a.data.layers.map(blob));
 assert.ok(records.some(r=>r.predicateType==='https://spdx.dev/Document' && r.predicate?.spdxVersion?.startsWith('SPDX-') && r.predicate.packages?.length),'Missing SPDX SBOM');
 assert.ok(records.some(r=>r.predicateType?.startsWith('https://slsa.dev/provenance/') && r.predicate),'Missing SLSA provenance');

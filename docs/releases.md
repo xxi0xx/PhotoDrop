@@ -16,8 +16,10 @@ metadata. Version is CLI-local, not a new unauthenticated details endpoint.
 
 ## Post-merge owner procedure
 
-Resolve the [readiness blockers](gate-8-validation.md): license, private vulnerability
-reporting, and live deployment validation. Merge the Gate 8 PR only after checks pass.
+Gate 8 PR #9 is merged. The owner selected Apache-2.0, enabled private vulnerability
+reporting, and completed live R2 and production Turnstile validation on 2026-09-24
+(America/Chicago). See the [post-merge readiness record](gate-8-validation.md).
+Merge the focused readiness finalization PR after checks pass.
 Review/finalize the Unreleased changelog into a dated 1.0.0 entry in a normal PR.
 Only then deliberately create/push `v1.0.0` on the chosen merged main commit.
 This preparation task does not create that tag or publish a stable release.
@@ -41,8 +43,10 @@ Release-sensitive actions are pinned to resolved immutable upstream commits.
 
 Buildx cross-compiles CGO-free binaries for linux/amd64 and linux/arm64, builds the
 minimal runtime, and publishes `ghcr.io/xxi0xx/photodrop:1.0.0` first. OCI source,
-revision, version, title and description labels identify the artifact. No license
-label is invented; add the selected SPDX identity when the owner supplies a license.
+revision, version, title and description labels identify the artifact. The license
+label is `Apache-2.0`; the canonical LICENSE is included in the runtime image.
+Runtime and OCI checks require the expected license label; runtime checks also
+verify the packaged license text. Publication still requires a root LICENSE.
 BuildKit publishes SBOM and maximum-mode provenance attestations with the image.
 See [Docker's attestation guidance](https://docs.docker.com/build/ci/github-actions/attestations/).
 Build arguments contain public version metadata only. This is not a claim of

@@ -162,9 +162,9 @@ configured backends so historical pending assets can refresh in the existing UI.
 
 This patch does not move/copy media, provide multiple active destinations, create
 a backend/credential-management UI, or add an encryption system. It does not
-add media features. Gate 5 abuse controls are described in [security.md](security.md). Live R2 testing remains
-unverified without credentials; deterministic tests and isolated Compose/browser
-tests cover backend routing separately from live-provider interoperability.
+add media features. Gate 5 abuse controls are described in [security.md](security.md).
+The owner completed [reference live R2 validation](live-validation.md) after Gate 8;
+deterministic tests and isolated Compose/browser tests cover backend routing separately.
 
 See the [validation report](storage-backends-validation.md) for commands, migration
 coverage, the Compose provider-switch scenarios, and browser regression evidence.

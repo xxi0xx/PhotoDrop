@@ -1,5 +1,9 @@
 # Gate 5 validation record
 
+Historical implementation-time record. The owner later completed
+[live R2 and production Turnstile validation](live-validation.md) and enabled
+private vulnerability reporting on 2026-09-24 (America/Chicago).
+
 Scope: Gate 5 security/abuse controls on top of merged backend-identity baseline
 `f2b2ffaba8840f1a26f8a8a36a684f3172b3dd26`. Branch: `codex/gate-5-security-abuse`.
 No Gate 6 export, Immich, QR, contributor identity, video, multipart upload,

@@ -9,9 +9,9 @@ It stores images locally or sends browser uploads directly to private S3-compati
 storage. Optional Immich integration copies completed photos through its API.
 
 **Release status:** preparing the first stable `v1.0.0`; it has not been published
-by this preparation change. A software license has **not yet been selected**.
-See [release readiness](docs/gate-8-validation.md) for owner decisions and live
-integration checks still required before a public release.
+by this preparation change. Licensed under Apache-2.0. Owner-completed live R2
+and production Turnstile validation passed; private vulnerability reporting is enabled.
+See [release readiness](docs/gate-8-validation.md) for the dated validation record.
 
 ## Features
 
@@ -84,14 +84,13 @@ Earlier gate validation records remain in `docs/` as historical evidence.
 ## Security and contributing
 
 Read [SECURITY.md](SECURITY.md) before reporting a vulnerability. Do not put exploit
-details or secrets in public issues. Private vulnerability reporting still needs
-repository-owner activation. See [CONTRIBUTING.md](CONTRIBUTING.md) for tests and PRs.
+details or secrets in public issues. GitHub private vulnerability reporting is enabled.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for tests and PRs.
 Future work uses normal versioned issues/milestones rather than additional gates.
 
 ## License
 
-Not yet selected. There is no repository software license granting open-source
-reuse rights. The owner must select and add a license before the community release.
+Licensed under the [Apache License, Version 2.0](LICENSE) (SPDX: `Apache-2.0`).
 
 ## Current limitations
 
@@ -99,5 +98,5 @@ Image-only: JPEG, PNG, WebP, GIF, HEIC, HEIF. No video, multipart/resumable uplo
 public gallery/downloads, guest accounts, or multi-administrator model. Signature
 checks are not antivirus or full image decoding. Use one server per data directory.
 Export needs a destination filesystem supporting hard links. Recovery selections
-exist only in the current browser page. See [limitations and live validation](docs/live-validation.md):
-live R2 and production-key Turnstile remain explicitly unverified.
+exist only in the current browser page. See [live validation](docs/live-validation.md)
+for the completed reference R2/production Turnstile flow and new-deployment checks.

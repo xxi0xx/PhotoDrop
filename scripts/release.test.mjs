@@ -1,10 +1,48 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { releasePlan } from './release.mjs';
+
+test('root license matches canonical Apache License 2.0 text', () => {
+  // Canonical https://www.apache.org/licenses/LICENSE-2.0.txt; tolerate checkout CRLF only.
+  const license = readFileSync('LICENSE', 'utf8').replace(/\r\n/g, '\n');
+  assert.equal(createHash('sha256').update(license).digest('hex'), 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30');
+});
+
+test('OCI verification requires Apache-2.0, rejecting absent or different licenses', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'photodrop-oci-license-'));
+  mkdirSync(join(dir, 'blobs', 'sha256'), {recursive:true});
+  function blob(value) {
+    const bytes = Buffer.from(JSON.stringify(value)), hash = createHash('sha256').update(bytes).digest('hex');
+    writeFileSync(join(dir, 'blobs', 'sha256', hash), bytes);
+    return {digest:`sha256:${hash}`, size:bytes.length};
+  }
+  try {
+    for (const license of [undefined, 'MIT', 'Apache-2.0']) {
+      const config = blob({os:'linux', architecture:'amd64', config:{Labels:{
+        'org.opencontainers.image.version':'1.0.0-rc.test',
+        'org.opencontainers.image.revision':'test',
+        'org.opencontainers.image.source':'https://github.com/xxi0xx/PhotoDrop',
+        'org.opencontainers.image.licenses':license,
+      }}});
+      const image = blob({config, layers:[]});
+      const subject = [{digest:{sha256:image.digest.slice(7)}}];
+      const attestation = blob({layers:[
+        blob({subject, predicateType:'https://spdx.dev/Document', predicate:{spdxVersion:'SPDX-2.3', packages:[{name:'photodrop'}]}}),
+        blob({subject, predicateType:'https://slsa.dev/provenance/v1', predicate:{}}),
+      ]});
+      attestation.annotations = {'vnd.docker.reference.type':'attestation-manifest', 'vnd.docker.reference.digest':image.digest};
+      writeFileSync(join(dir, 'index.json'), JSON.stringify({manifests:[image, attestation]}));
+      const result = spawnSync(process.execPath, ['scripts/verify-oci.mjs', dir, 'amd64', '1.0.0-rc.test', 'test'], {encoding:'utf8'});
+      if (license === 'Apache-2.0') assert.equal(result.status, 0, result.stderr);
+      else { assert.notEqual(result.status, 0); assert.match(result.stderr, /Apache-2\.0/); }
+    }
+  } finally { rmSync(dir, {recursive:true, force:true}); }
+});
 
 test('stable and prerelease tags', () => {
   assert.deepEqual(releasePlan('v1.0.0', 'xxi0xx/PhotoDrop'), { version: '1.0.0', image: 'ghcr.io/xxi0xx/photodrop', immutable: 'ghcr.io/xxi0xx/photodrop:1.0.0', prerelease: false, aliases: ['ghcr.io/xxi0xx/photodrop:1.0', 'ghcr.io/xxi0xx/photodrop:1', 'ghcr.io/xxi0xx/photodrop:latest'] });

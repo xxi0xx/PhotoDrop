@@ -60,5 +60,4 @@ Test-only fault injection belongs in test executables/fixtures, never production
 switches. No automatic dependency merging is enabled.
 
 Report vulnerabilities through [SECURITY.md](SECURITY.md), not public bug reports.
-The owner has not yet selected a license; resolve contribution/reuse terms before
-submitting substantial external contributions. Release work follows [the policy](docs/releases.md).
+The project uses [Apache-2.0](LICENSE). Release work follows [the policy](docs/releases.md).
