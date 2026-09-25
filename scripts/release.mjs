@@ -13,10 +13,21 @@ export function releasePlan(tag, repository) {
   return { version, image, prerelease: Boolean(pre), immutable: `${image}:${version}`, aliases: pre ? [] : [`${image}:${major}.${minor}`, `${image}:${major}`, `${image}:latest`] };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  if (process.env.GITHUB_EVENT_NAME !== 'push' || process.env.GITHUB_REF_TYPE !== 'tag') throw new Error('Publishing requires a tag push');
-  const plan = releasePlan(process.env.GITHUB_REF_NAME, process.env.GITHUB_REPOSITORY);
+export function recoveryPlan(tag, env = process.env) {
+  if (env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || env.GITHUB_REF !== 'refs/heads/main' ||
+      env.GITHUB_WORKFLOW_REF !== `${env.GITHUB_REPOSITORY}/.github/workflows/release-recover.yml@refs/heads/main`) {
+    throw new Error('Recovery requires the trusted main workflow definition');
+  }
+  return releasePlan(tag, env.GITHUB_REPOSITORY);
+}
+
+export function writePlanOutputs(plan) {
   if (!process.env.GITHUB_OUTPUT) throw new Error('Missing Actions output path');
   for (const key of ['version', 'image', 'prerelease', 'immutable']) appendFileSync(process.env.GITHUB_OUTPUT, `${key}=${plan[key]}\n`);
   appendFileSync(process.env.GITHUB_OUTPUT, `aliases=${JSON.stringify(plan.aliases)}\n`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  if (process.env.GITHUB_EVENT_NAME !== 'push' || process.env.GITHUB_REF_TYPE !== 'tag') throw new Error('Publishing requires a tag push');
+  writePlanOutputs(releasePlan(process.env.GITHUB_REF_NAME, process.env.GITHUB_REPOSITORY));
 }

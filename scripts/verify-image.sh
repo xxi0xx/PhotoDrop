@@ -2,6 +2,7 @@
 # Disposable runtime inspection; never mounts operator state.
 set -eu
 image=$1 version=$2 revision=$3 platform=${4:-linux/amd64}
+test "$(docker image inspect "$image" --format '{{.Os}}/{{.Architecture}}')" = "$platform"
 test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')" = "$version"
 test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$revision"
 test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.source"}}')" = 'https://github.com/xxi0xx/PhotoDrop'
