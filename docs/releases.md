@@ -19,9 +19,10 @@ metadata. Version is CLI-local, not a new unauthenticated details endpoint.
 Gate 8 PR #9 is merged. The owner selected Apache-2.0, enabled private vulnerability
 reporting, and completed live R2 and production Turnstile validation on 2026-09-24
 (America/Chicago). See the [post-merge readiness record](gate-8-validation.md).
-Merge the focused readiness finalization PR after checks pass.
-Review/finalize the Unreleased changelog into a dated 1.0.0 entry in a normal PR.
-Only then deliberately create/push `v1.0.0` on the chosen merged main commit.
+Readiness finalization PR #16 is merged. The changelog now has a dated 1.0.0
+entry and an empty Unreleased section for future work. After this documentation
+PR is merged, confirm the entry's date matches the actual release day, then
+deliberately create/push `v1.0.0` on the chosen merged main commit.
 This preparation task does not create that tag or publish a stable release.
 
 Accept tags `vMAJOR.MINOR.PATCH` or `vMAJOR.MINOR.PATCH-PRERELEASE`. Numeric fields

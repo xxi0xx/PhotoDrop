@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased] — prepared for 1.0.0
+## [Unreleased]
+
+## [1.0.0] — 2026-09-25
 
 - Event management with permanent public links, expiration, enable/disable and QR PNGs.
 - Anonymous mobile image uploads, optional contributor names, progress and failed-only retry.
@@ -19,4 +21,3 @@ Known limitations: images only; no video, resumable multipart upload, gallery, g
 accounts or multiple administrators. One server per data directory. Export requires
 hard links. Immich v3.2.1 is the verified version. Reference live R2 and production-key
 Turnstile validation passed; this does not certify every provider or deployment.
-No stable release date has been assigned.
