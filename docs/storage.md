@@ -79,8 +79,10 @@ PHOTODROP_S3_PRESIGN_TTL=10m
 
 This configuration follows the [Cloudflare Go SDK example](https://developers.cloudflare.com/r2/examples/aws/aws-sdk-go/).
 The SDK selects the addressing form; PhotoDrop does not construct R2 URLs or
-require Cloudflare Tunnel. **Live R2 interoperability has not been verified in
-this development environment because R2 credentials were not available.**
+require Cloudflare Tunnel. The owner completed reference live R2 browser validation
+on 2026-09-24 (America/Chicago), including direct PUT, completion and deletion.
+See [sanitized results and new-deployment checks](live-validation.md). This is not
+certification of every S3-compatible provider.
 
 ## Browser CORS
 

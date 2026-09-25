@@ -6,6 +6,8 @@ test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.open
 test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$revision"
 test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.source"}}')" = 'https://github.com/xxi0xx/PhotoDrop'
 test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.title"}}')" = PhotoDrop
+test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}')" = Apache-2.0
+test "$(docker run --rm --platform "$platform" --entrypoint sha256sum "$image" /usr/share/licenses/photodrop/LICENSE | cut -d ' ' -f 1)" = cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
 test "$(docker run --rm --platform "$platform" "$image" photodrop version)" = "PhotoDrop $version ($revision)"
 password=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
 container=$(docker run -d --platform "$platform" -e PHOTODROP_ADMIN_PASSWORD="$password" "$image")

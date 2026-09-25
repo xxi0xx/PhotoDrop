@@ -12,9 +12,11 @@
 - One-container deployment, persistent SQLite/data, non-root app, health and graceful shutdown.
 - SemVer version metadata, GHCR release preparation, amd64/arm64 builds, OCI labels,
   BuildKit SBOM/provenance, operational guides and community templates.
+- Apache-2.0 license and OCI license metadata; GitHub private vulnerability reporting enabled.
+- Owner-completed live Cloudflare R2 and production Turnstile validation recorded.
 
 Known limitations: images only; no video, resumable multipart upload, gallery, guest
 accounts or multiple administrators. One server per data directory. Export requires
-hard links. Immich v3.2.1 is the verified version. Live R2 and production-key Turnstile
-remain unverified. License and private reporting readiness need owner action.
+hard links. Immich v3.2.1 is the verified version. Reference live R2 and production-key
+Turnstile validation passed; this does not certify every provider or deployment.
 No stable release date has been assigned.

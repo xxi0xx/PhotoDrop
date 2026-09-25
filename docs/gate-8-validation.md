@@ -135,7 +135,10 @@ that every possible secret format is detectable. Disposable test containers/volu
 local registry, OCI archives, browser session/data/screenshots, logs, temporary tools
 and generated binary were removed; unrelated operator state was preserved.
 
-## Owner decisions and public-release blockers
+## Gate 8 implementation-time owner decisions and blockers (2026-09-23)
+
+The following was the state during implementation, before the owner completed
+production validation. It is retained as history and superseded by the next section.
 
 - No LICENSE exists. The owner must select a license; none is invented here.
 - GitHub private vulnerability reporting is disabled (API checked 2026-09-23).
@@ -148,3 +151,38 @@ and generated binary were removed; unrelated operator state was preserved.
 
 This is focused release engineering/security review, not a formal exhaustive audit.
 There are no post-v1 product features or database migrations in this gate.
+
+## Post-merge owner validation — 2026-09-24 America/Chicago
+
+Gate 8 PR #9 merged as `4fbfd3919e9ea61ff5a84b42d785131b5ba0a915`.
+The owner subsequently supplied sanitized production outcomes; Codex did not hold
+production credentials during Gate 8 and did not rerun these live tests.
+
+| Readiness item | Current result |
+| --- | --- |
+| Software license | **RESOLVED** — owner-selected Apache-2.0; canonical root LICENSE and OCI license label |
+| Private vulnerability reporting | **RESOLVED** — enabled, independently confirmed through the GitHub API; owner's SECURITY.md preserved |
+| Live Cloudflare R2 validation | **PASSED** — real browser direct upload, CORS, completion, totals and scoped event deletion |
+| Live production Turnstile validation | **PASSED** — real challenge and upload-session creation through strict production Siteverify hostname/action checks |
+
+Reference deployment: `https://drop.mariascloud.com`, private bucket
+`mariascloud-photodrop`. [Live validation](live-validation.md) records exact sanitized
+observations, evidence limits and procedures for new deployments. No HAR, credentials,
+signed query strings, cookies or challenge tokens are included. These results resolve
+the four earlier owner blockers, without claiming provider certification.
+
+The first stable version remains unpublished `v1.0.0`. After this focused PR is
+merged, the owner still deliberately finalizes release notes and pushes the intended
+tag; confirm public GHCR package visibility on first publication. No product behavior,
+Turnstile semantics or migration is changed by this finalization.
+
+Finalization checks (same date): npm ci/check/build and all 34 frontend tests passed;
+CGO-free Go tests, Linux race tests and vet passed. All eight release tests passed,
+including canonical Apache text and rejection of missing/wrong OCI license labels.
+Both amd64 and emulated arm64 candidates passed OCI SBOM/provenance and runtime
+checks, including Apache-2.0 metadata, packaged LICENSE hash, health, UID 10001 and
+SIGTERM. Compose config, 26-document/68-link coverage and diff checks passed.
+The credential-pattern review of Git-visible files found no leaked validation
+credentials or HAR additions; it is not an exhaustive security audit. Application
+code, migrations 001–009 and the owner's SECURITY.md are unchanged. PR CI provides
+the independent clean-runner result; no live production tests were rerun.

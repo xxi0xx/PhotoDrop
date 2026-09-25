@@ -25,7 +25,8 @@ LABEL org.opencontainers.image.source="https://github.com/xxi0xx/PhotoDrop" \
       org.opencontainers.image.revision=$REVISION \
       org.opencontainers.image.version=$VERSION \
       org.opencontainers.image.title="PhotoDrop" \
-      org.opencontainers.image.description="Self-hosted event photo collection"
+      org.opencontainers.image.description="Self-hosted event photo collection" \
+      org.opencontainers.image.licenses="Apache-2.0"
 RUN apk add --no-cache su-exec \
     && addgroup -g 10001 photodrop \
     && adduser -D -H -u 10001 -G photodrop photodrop \
@@ -33,6 +34,7 @@ RUN apk add --no-cache su-exec \
     && chown photodrop:photodrop /data \
     && chmod 0700 /data
 COPY --from=backend /out/photodrop /usr/local/bin/photodrop
+COPY LICENSE /usr/share/licenses/photodrop/LICENSE
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 ENV PHOTODROP_LISTEN_ADDR=:8080 PHOTODROP_DATA_DIR=/data
 EXPOSE 8080

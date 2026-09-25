@@ -16,5 +16,6 @@ Tokens are single-use and held in page memory. Ambiguous redemption needs a new
 challenge. The server does not send guest IP to Siteverify; the widget still
 connects the browser to Cloudflare. Review its privacy terms and your disclosures.
 
-Test keys do not prove a production flow. See [live validation](live-validation.md)
+Test keys do not prove a production flow. The owner completed the real production-key
+flow on 2026-09-24 (America/Chicago); see [live validation](live-validation.md)
 and [security details](security.md). Never share tokens, response payloads or secrets.

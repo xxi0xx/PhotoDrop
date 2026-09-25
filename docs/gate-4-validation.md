@@ -1,5 +1,8 @@
 # Gate 4 validation
 
+Historical implementation-time record. The owner later completed
+[live R2 validation](live-validation.md) on 2026-09-24 (America/Chicago).
+
 Validated on Windows with Go 1.26, Node 22+, Docker Desktop Linux containers,
 and the Codex in-app Chromium browser on September 11–12, 2026. The baseline is
 Gate 3 merged on `main` (`fa256d6aa4a8d6c1b1715f24003f781a18733d9b`).
