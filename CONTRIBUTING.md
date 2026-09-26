@@ -1,9 +1,18 @@
 # Contributing
 
-Use Go 1.26, Node 22.12+ (CI uses Node 22), npm, Git, and Docker with Compose v2.
+Use Go 1.26, Node 24 LTS (CI uses Node 24), npm, Git, and Docker with Compose v2.
 Linux is the CI/race reference platform; race testing requires a C toolchain.
 Build the embedded frontend before Go tests. Windows can run CGO-free checks and
 use Linux/Docker for race/integration checks.
+
+Type checking uses TypeScript 7.0.2 through Svelte's documented `--tsgo` mode.
+The `@typescript/native` npm alias installs the official compiler; TypeScript
+6.0.3 remains alongside it for Svelte's transformation tooling. Keep both packages
+when updating the lockfile. `--fail-on-warnings` still applies. See the
+[Svelte checker setup](https://github.com/sveltejs/language-tools/tree/master/packages/svelte-check#typescript-7-supports).
+The `precheck` script removes the generated `.svelte-check` directory before each
+run so deleted or renamed components cannot leave stale diagnostics. That directory
+is excluded from Git and Docker build contexts.
 
 ```sh
 npm ci --prefix web

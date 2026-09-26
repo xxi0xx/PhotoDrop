@@ -1,12 +1,14 @@
 // New-user Compose install from public files only; never reads the developer .env.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { randomBytes, createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, relative } from 'node:path';
 import { photo } from './photo-fixture.mjs';
 
+const runAsync = promisify(execFile);
 const root=process.cwd(), dir=mkdtempSync(join(tmpdir(),'photodrop-fresh-'));
 const project=`photodrop-fresh-${randomBytes(5).toString('hex')}`;
 const password=randomBytes(24).toString('hex'), base='http://localhost:8080';
@@ -21,7 +23,7 @@ for(const file of files) {
 writeFileSync(join(dir,'.env'),readFileSync(join(dir,'.env.example'),'utf8').replace(/^PHOTODROP_ADMIN_PASSWORD=$/m,`PHOTODROP_ADMIN_PASSWORD=${password}`).replace(/^PHOTODROP_BASE_URL=$/m,`PHOTODROP_BASE_URL=${base}`),{mode:0o600});
 const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('PHOTODROP_') && !key.startsWith('COMPOSE_')));
 env.COMPOSE_PROJECT_NAME=project; env.PHOTODROP_IMAGE=`${project}:candidate`;
-const compose=(args, s3=false, capture=false)=>execFileSync('docker',['compose','--project-directory',dir,'-f',join(dir,'compose.yml'),...(s3?['-f',join(dir,'compose.fixture.yml')]:[]),...args],{cwd:dir,env,encoding:'utf8',stdio:capture?['ignore','pipe','pipe']:'inherit'});
+const compose=(args, s3=false, capture=false, run=execFileSync)=>run('docker',['compose','--project-directory',dir,'-f',join(dir,'compose.yml'),...(s3?['-f',join(dir,'compose.fixture.yml')]:[]),...args],{cwd:dir,env,encoding:'utf8',stdio:capture?['ignore','pipe','pipe']:'inherit'});
 let cookie='',csrf='';
 async function json(method,path,body,status=200,admin=true) {
   const headers={Origin:base,'Content-Type':'application/json'};
@@ -65,7 +67,8 @@ try {
     execFileSync(shell, ['scripts/smoke-compose.sh'], {cwd:dir, env:{...env,MSYS_NO_PATHCONV:'1'},stdio:'inherit'});
   } else for(const s3 of [false,true]) {
     compose(['config','--quiet'],s3);
-    compose(['up','--build','--wait','--wait-timeout','180','-d'],s3);
+    // Allow fetch to process socket closure between the two disposable installs.
+    await compose(['up','--build','--wait','--wait-timeout','180','-d'],s3,false,runAsync);
     assert.equal((await json('GET','/healthz')).body.status,'ok');
     const login=await json('POST','/api/admin/login',{password},200,false);
     cookie=login.response.headers.getSetCookie()[0].split(';')[0];csrf=login.body.csrf_token;
@@ -92,7 +95,7 @@ try {
     const hash=compose(['exec','-T','photodrop','sha256sum','/data/fresh-export/photos/'+manifest.assets[0].exportFilename],s3,true).split(' ')[0];
     assert.equal(hash,createHash('sha256').update(bytes).digest('hex'));
     console.log(`Fresh ${s3?'S3':'local'} install: documented files, no old .env, health, login, event URL, named guest upload, export hash passed.`);
-    compose(['down'],s3);
+    await compose(['down'],s3,false,runAsync);
   }
 } finally {
   try {compose(['down','--remove-orphans'],true);} catch {}

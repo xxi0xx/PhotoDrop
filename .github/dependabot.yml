@@ -22,3 +22,7 @@ updates:
     directory: /
     schedule: {interval: monthly}
     open-pull-requests-limit: 3
+    ignore:
+      # Node 25 never enters LTS. Keep 24.x and future LTS upgrades visible.
+      - dependency-name: node
+        versions: ['~> 25.0']

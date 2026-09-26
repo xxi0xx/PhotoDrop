@@ -3,7 +3,10 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const run = promisify(execFile);
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 const password = process.env.PHOTODROP_ADMIN_PASSWORD;
@@ -55,8 +58,9 @@ try {
   const edited = (await call('PUT', path, { ...draft, name: `Edited ${draft.name}` })).json.event;
   assert.equal(edited.public_id, first.public_id);
   assert.equal(edited.created_at, first.created_at);
-  execFileSync('docker', ['compose', 'restart'], { stdio: 'inherit' });
-  execFileSync('docker', ['compose', 'up', '--wait', '--wait-timeout', '120', '-d'], { stdio: 'inherit' });
+  // Keep Node's event loop running so fetch can retire sockets closed by restart.
+  await run('docker', ['compose', 'restart']);
+  await run('docker', ['compose', 'up', '--wait', '--wait-timeout', '120', '-d']);
   const resumed = (await call('GET', '/api/admin/session')).json;
   assert.equal(resumed.csrf_token, csrf); assert.equal(resumed.expires_at, expires);
   assert.deepEqual((await call('GET', path)).json.event, edited);
