@@ -1,23 +1,26 @@
 // Real Immich + historical storage/export lifecycle. All accounts and media
 // belong to the isolated test Compose project; never reads the production .env.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { photo } from './photo-fixture.mjs';
 
+const runAsync = promisify(execFile);
 const base = 'http://localhost:8083', immich = 'http://localhost:22830/api';
 const composeArgs = ['compose', '-f', 'scripts/compose-immich-test.yml'];
 const account = { email: 'photodrop-test@example.test', password: 'temporary-immich-test-account-password' };
 let apiKey = '', accessToken = '', cookie = '', csrf = '', active = 'local-default';
-function compose(args, capture = false, key = apiKey) {
-  return execFileSync('docker', [...composeArgs, ...args], {
+function compose(args, capture = false, key = apiKey, run = execFileSync) {
+  return run('docker', [...composeArgs, ...args], {
     stdio: capture ? ['ignore', 'pipe', 'pipe'] : 'inherit', encoding: capture ? 'utf8' : undefined,
     env: { ...process.env, PHOTODROP_TEST_PROVIDER: active === 'local-default' ? 'local' : 's3', PHOTODROP_TEST_BACKEND_KEY: active, PHOTODROP_TEST_IMMICH_KEY: key },
   });
 }
 function restart(backend = active, key = apiKey) {
-  active = backend; compose(['up', '-d', '--no-deps', '--force-recreate', '--wait', '--wait-timeout', '120', 'photodrop'], false, key);
+  // Let fetch retire closed sockets while Docker recreates the test service.
+  active = backend; return compose(['up', '-d', '--no-deps', '--force-recreate', '--wait', '--wait-timeout', '120', 'photodrop'], false, key, runAsync);
 }
 async function remote(method, path, data, expected = 200, useSession = false) {
   const headers = { 'Content-Type': 'application/json' };
@@ -80,11 +83,11 @@ else {
 }
 const key = await remote('POST', '/api-keys', { name: `PhotoDrop test ${randomUUID()}`, permissions: ['album.create', 'album.read', 'asset.upload', 'albumAsset.create'] }, 201, true);
 apiKey = key.secret; assert.ok(apiKey, 'test API key missing');
-restart('local-default'); await login(); await control({});
+await restart('local-default'); await login(); await control({});
 const event = await createEvent('Gate 6 lifecycle');
 const local = await upload(event);
-restart('s3-a'); const a = await upload(event);
-restart('s3-b'); const b = await upload(event);
+await restart('s3-a'); const a = await upload(event);
+await restart('s3-b'); const b = await upload(event);
 const assets = [local, a, b];
 const exportPath = `/export/event-${event.id}-${randomUUID()}`;
 // Test-only volume ownership; production optional bind mounts stay operator-owned.
@@ -125,24 +128,24 @@ assert.equal(current.failed, 0); assert.equal(current.duplicate, 1); assert.equa
 assert.equal((await control()).duplicates - beforeLostRetry.duplicates, 1); assert.equal((await remote('GET', `/albums/${albumID}`)).assetCount, 7);
 console.log('Real partial failure/retry and response loss after acceptance recovered through Immich deduplication.');
 
-restart('local-default');
+await restart('local-default');
 for (let i = 0; i < 20; i++) await upload(event);
 await control({ delay_ms: 700 });
 await json('POST', pathFor(event) + '/jobs', { mode: 'new' }, 202);
 current = await waitFor(event, s => s.imported + s.duplicate >= 15 && s.job.status === 'running');
 const saved = current.imported + current.duplicate, jobID = current.job.id;
 compose(['kill', '-s', 'SIGKILL', 'photodrop']);
-await control({}); restart();
+await control({}); await restart();
 current = await waitFor(event, s => s.job.status === 'completed');
 assert.equal(current.job.id, jobID); assert.equal(current.imported + current.duplicate, 27); assert.ok(saved >= 15);
 assert.equal((await remote('GET', `/albums/${albumID}`)).assetCount, 27);
 console.log(`Abrupt process restart recovered job ${jobID} with ${saved} assets already accounted for.`);
 
 // Optional integration failures never become process-health failures.
-restart(active, 'deliberately-invalid-test-key');
+await restart(active, 'deliberately-invalid-test-key');
 await json('POST', pathFor(event) + '/test', {}, 503); await json('GET', '/healthz');
-restart(active, ''); await json('POST', pathFor(event) + '/test', {}, 503); await json('GET', '/healthz');
-restart(); compose(['stop', 'immich-server']);
+await restart(active, ''); await json('POST', pathFor(event) + '/test', {}, 503); await json('GET', '/healthz');
+await restart(); compose(['stop', 'immich-server']);
 await json('POST', pathFor(event) + '/test', {}, 503); await json('GET', '/healthz');
 compose(['up', '-d', '--wait', '--wait-timeout', '180', 'immich-server']);
 await json('DELETE', `/api/admin/events/${event.id}`, undefined, 204);

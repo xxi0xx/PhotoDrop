@@ -2,7 +2,10 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const runAsync = promisify(execFile);
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 const password = process.env.PHOTODROP_ADMIN_PASSWORD;
@@ -67,8 +70,9 @@ try {
   await send(first, firstSession, 'closed.png', png, 409);
   await json('POST', `/api/public/events/${first.public_id}/upload-sessions`, {}, 409);
   await json('PUT', `/api/admin/events/${first.id}`, { name: first.name, enabled: true }, 200, true);
-  execFileSync('docker', ['compose', 'restart'], { stdio: 'inherit' });
-  execFileSync('docker', ['compose', 'up', '--wait', '--wait-timeout', '120', '-d'], { stdio: 'inherit' });
+  // Keep fetch socket-close handling active while the test server restarts.
+  await runAsync('docker', ['compose', 'restart']);
+  await runAsync('docker', ['compose', 'up', '--wait', '--wait-timeout', '120', '-d']);
   assert.equal(digest(stored(first, one)), expectedDigest);
   stats = (await json('GET', `/api/admin/events/${first.id}`, undefined, 200, true)).body.event.media;
   assert.deepEqual(stats, { photo_count: 2, storage_bytes: png.length * 2 });
