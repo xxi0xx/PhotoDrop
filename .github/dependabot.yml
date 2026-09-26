@@ -10,6 +10,10 @@ updates:
     directory: /web
     schedule: {interval: monthly}
     open-pull-requests-limit: 3
+    ignore:
+      # @typescript/native already checks with TS7; typescript is Svelte's TS6 companion.
+      - dependency-name: typescript
+        versions: ['>=7.0.0 <8.0.0']
     groups:
       compatible: {update-types: [minor, patch]}
   - package-ecosystem: github-actions

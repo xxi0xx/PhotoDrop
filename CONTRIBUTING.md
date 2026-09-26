@@ -1,6 +1,6 @@
 # Contributing
 
-Use Go 1.26, Node 24 LTS (CI uses Node 24), npm, Git, and Docker with Compose v2.
+Use Go 1.27, Node 24 LTS (CI uses Node 24), npm, Git, and Docker with Compose v2.
 Linux is the CI/race reference platform; race testing requires a C toolchain.
 Build the embedded frontend before Go tests. Windows can run CGO-free checks and
 use Linux/Docker for race/integration checks.

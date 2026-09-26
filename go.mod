@@ -1,11 +1,11 @@
 module photodrop
 
-go 1.26.0
+go 1.27.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.0
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.5
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.113.1
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.113.2
 	github.com/aws/smithy-go v1.28.2
 	golang.org/x/crypto v0.57.0
 	modernc.org/sqlite v1.59.0
