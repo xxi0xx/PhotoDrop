@@ -9,8 +9,8 @@ import (
 )
 
 var ErrExpired = errors.New("Your upload session expired. Start a new session to continue.")
-var ErrEventQuota = errors.New("This event has reached its photo or storage limit. Contact the organizer.")
-var ErrSessionQuota = errors.New("This upload session has reached its photo or storage limit. Start a new session to continue.")
+var ErrEventQuota = errors.New("This event has reached its file or storage limit. Contact the organizer.")
+var ErrSessionQuota = errors.New("This upload session has reached its file or storage limit. Start a new session to continue.")
 
 func (s *Service) ConfigureSecurity(c config.Security) { s.security = c.Defaults() }
 

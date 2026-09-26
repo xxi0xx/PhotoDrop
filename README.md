@@ -1,12 +1,12 @@
 # PhotoDrop
 
-Collect event photos from guests without asking them to create accounts. Share an
-event link or QR code; guests choose images, optionally leave their name, and
+Collect event photos and videos from guests without asking them to create accounts. Share an
+event link or QR code; guests choose files, optionally leave their name, and
 upload from their phone. One administrator manages events, quotas, and exports.
 
 PhotoDrop runs as one Go container with an embedded Svelte interface and SQLite.
-It stores images locally or sends browser uploads directly to private S3-compatible
-storage. Optional Immich integration copies completed photos through its API.
+It stores media locally or sends browser uploads directly to private S3-compatible
+storage. Optional Immich integration copies completed media through its API.
 
 **Release status:** `v1.0.0` is ready for the owner's release tag; publication
 is triggered by that tag. Licensed under Apache-2.0. Owner-completed live R2
@@ -17,7 +17,7 @@ See [release readiness](docs/gate-8-validation.md) for the dated validation reco
 
 - Events with permanent public IDs, enable/disable state, dates, and expiration.
 - Browser-generated QR codes and downloadable PNGs, with no external QR service.
-- Mobile image selection, progress, failed-only retry, and add-more flow.
+- Mobile image/video selection, progress, failed-only retry, and add-more flow.
 - Optional private contributor labels; no guest profiles or public photo browsing.
 - Local or direct S3 uploads, historical backend identity, and finalize-first recovery.
 - Administrator authentication, CSRF/origin checks, quotas, rate limits, optional Turnstile.
@@ -26,9 +26,9 @@ See [release readiness](docs/gate-8-validation.md) for the dated validation reco
 ## How uploads work
 
 ```text
-Local: Browser -- image bytes --> PhotoDrop --> /data/uploads
+Local: Browser -- media bytes --> PhotoDrop --> /data/uploads
 S3:    Browser -- control -----> PhotoDrop --> SQLite metadata
-       Browser -- image bytes ----------------> private object storage
+       Browser -- media bytes ----------------> private object storage
                                 PhotoDrop --> HEAD / bounded verification read
 ```
 
@@ -74,7 +74,7 @@ versions are not independently verified. See [export and Immich](docs/export-imm
 | Expose safely | [Reverse proxy / HTTPS](docs/reverse-proxy.md), [security controls](docs/security.md), [Turnstile](docs/turnstile.md) |
 | Choose storage | [S3/R2](docs/storage.md), [historical backends](docs/storage-backends.md) |
 | Share and collect | [Guest and administrator UX](docs/production-ux.md) |
-| Keep and move photos | [Export / Immich](docs/export-immich.md), [backup / restore](docs/backup-restore.md) |
+| Keep and move media | [Export / Immich](docs/export-immich.md), [backup / restore](docs/backup-restore.md) |
 | Operate and upgrade | [Upgrading](docs/upgrading.md), [troubleshooting](docs/troubleshooting.md) |
 | Understand and contribute | [Architecture](docs/architecture.md), [contributing](CONTRIBUTING.md) |
 | Release history and process | [Changelog](CHANGELOG.md), [release policy](docs/releases.md), [validation](docs/gate-8-validation.md) |
@@ -94,9 +94,11 @@ Licensed under the [Apache License, Version 2.0](LICENSE) (SPDX: `Apache-2.0`).
 
 ## Current limitations
 
-Image-only: JPEG, PNG, WebP, GIF, HEIC, HEIF. No video, multipart/resumable uploads,
+Supported on this development branch: JPEG, PNG, WebP, GIF, HEIC, HEIF, MP4 and
+QuickTime MOV. Video support is unreleased (v1.0.0 supports images only). See
+[media formats and validation](docs/media-formats.md). No transcoding, playback UI, multipart/resumable uploads,
 public gallery/downloads, guest accounts, or multi-administrator model. Signature
-checks are not antivirus or full image decoding. Use one server per data directory.
+checks are not antivirus or full media decoding. Use one server per data directory.
 Export needs a destination filesystem supporting hard links. Recovery selections
 exist only in the current browser page. See [live validation](docs/live-validation.md)
 for the completed reference R2/production Turnstile flow and new-deployment checks.

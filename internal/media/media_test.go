@@ -83,7 +83,7 @@ func TestIncompleteCleanupPreservesCommittedReadyAsset(t *testing.T) {
 func TestFormatsFilenamesStatsAndRestart(t *testing.T) {
 	s, dir, e, session := fixture(t)
 	var total int64
-	for kind, data := range testutil.Images() {
+	for kind, data := range testutil.Media() {
 		a, err := s.Upload(t.Context(), e.PublicID, session.ID, "same-name.jpg", "application/octet-stream", bytes.NewReader(data), -1, 1024*1024)
 		if err != nil || a.MIMEType != kind || a.Status != "ready" || a.Size != int64(len(data)) {
 			t.Fatalf("%s: %+v, %v", kind, a, err)
@@ -105,7 +105,7 @@ func TestFormatsFilenamesStatsAndRestart(t *testing.T) {
 		}
 	}
 	stats, err := s.Stats(t.Context())
-	if err != nil || stats[e.ID].PhotoCount != 13 || stats[e.ID].StorageBytes != total {
+	if err != nil || stats[e.ID].PhotoCount != 15 || stats[e.ID].StorageBytes != total {
 		t.Fatalf("stats: %+v, %v", stats, err)
 	}
 	s.db.Close()
@@ -123,7 +123,7 @@ func TestFormatsFilenamesStatsAndRestart(t *testing.T) {
 		t.Fatal("restart lost ready assets")
 	}
 	files, err := os.ReadDir(filepath.Join(dir, "uploads"))
-	if err != nil || len(files) != 13 {
+	if err != nil || len(files) != 15 {
 		t.Fatalf("restart lost media: %d, %v", len(files), err)
 	}
 }
@@ -140,7 +140,7 @@ func TestValidationAndSessionIsolation(t *testing.T) {
 		{"empty", "a.jpg", "image/jpeg", nil, 1000, ErrEmpty},
 		{"disguised text", "a.jpg", "image/jpeg", []byte("not an image"), 1000, ErrType},
 		{"svg", "a.svg", "image/svg+xml", []byte("<svg/>"), 1000, ErrType},
-		{"video", "a.mov", "video/quicktime", image, 1000, ErrType},
+		{"unsupported video", "a.webm", "video/webm", image, 1000, ErrType},
 		{"missing filename", "", "image/jpeg", image, 1000, ErrFilename},
 		{"long filename", strings.Repeat("é", 256), "image/jpeg", image, 1000, ErrFilename},
 		{"invalid UTF8", string([]byte{255}), "image/jpeg", image, 1000, ErrFilename},

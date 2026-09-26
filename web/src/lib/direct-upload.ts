@@ -31,7 +31,7 @@ function canUpload(error: unknown): boolean {
 // completion response always tries verification first; each run permits at most
 // two PUTs. Transient server/storage errors do not trigger another media upload.
 export async function runDirect(attempt: DirectAttempt, ops: DirectOps): Promise<void> {
-  const canceled = () => { if (ops.canceled()) throw new Error('Upload canceled. You can retry this photo.'); };
+  const canceled = () => { if (ops.canceled()) throw new Error('Upload canceled. You can retry this file.'); };
   const complete = async () => { canceled(); ops.stage('verifying'); await ops.complete(attempt.assetID!); };
   let plan: UploadPlan;
   if (attempt.assetID) {
@@ -50,7 +50,7 @@ export async function runDirect(attempt: DirectAttempt, ops: DirectOps): Promise
       canceled();
       try { await complete(); return; }
       catch (verification) { if (!canUpload(verification)) throw verification; }
-      if (putAttempt === 1) throw new Error('Upload failed. Check your connection and retry this photo.');
+      if (putAttempt === 1) throw new Error('Upload failed. Check your connection and retry this file.');
       ops.stage('preparing'); plan = (await ops.authorize(attempt.assetID!)).upload;
       continue;
     }
