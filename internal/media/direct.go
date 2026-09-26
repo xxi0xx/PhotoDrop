@@ -12,7 +12,7 @@ import (
 
 var ErrStrategy = errors.New("reload the event page to get current upload instructions")
 var ErrAsset = errors.New("upload attempt not found for this event and session")
-var ErrReady = errors.New("this photo is already complete")
+var ErrReady = errors.New("this file is already complete")
 var ErrRequest = errors.New("upload metadata does not match the original attempt")
 
 type Preparation struct {

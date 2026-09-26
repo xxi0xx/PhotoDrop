@@ -7,8 +7,8 @@ has no Node/Go compiler. Use one server per persistent `/data` directory.
 ```mermaid
 flowchart LR
   Browser -->|control, session, finalize| Go[PhotoDrop]
-  Browser -->|direct image PUT| S3[Private object storage]
-  Browser -->|local image POST| Go
+  Browser -->|direct media PUT| S3[Private object storage]
+  Browser -->|local media POST| Go
   Go --> DB[SQLite metadata]
   Go --> Local[/data/uploads]
   Go -->|HEAD and bounded signature read| S3

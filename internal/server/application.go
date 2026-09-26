@@ -130,12 +130,12 @@ func (a *application) fail(w http.ResponseWriter, err error) {
 	case errors.Is(err, media.ErrRequest):
 		apiError(w, 422, "upload_metadata", media.ErrRequest.Error(), nil)
 	case errors.Is(err, storage.ErrMissing):
-		apiError(w, 409, "object_missing", "The upload has not arrived. Please retry this photo.", nil)
+		apiError(w, 409, "object_missing", "The upload has not arrived. Please retry this file.", nil)
 	case errors.Is(err, storage.ErrObjectChanged):
-		apiError(w, 409, "object_changed", "The upload could not be verified. Please retry this photo.", nil)
+		apiError(w, 409, "object_changed", "The upload could not be verified. Please retry this file.", nil)
 	case errors.Is(err, storage.ErrBackend), errors.Is(err, storage.ErrUnavailable):
 		a.logger.Error("object storage operation unavailable", "error", err)
-		apiError(w, 503, "storage_unavailable", "Photo storage is temporarily unavailable. Please try again later.", nil)
+		apiError(w, 503, "storage_unavailable", "Media storage is temporarily unavailable. Please try again later.", nil)
 	case errors.Is(err, media.ErrClosed):
 		apiError(w, 409, "event_closed", "This event is no longer accepting uploads.", nil)
 	case errors.Is(err, media.ErrSession):
@@ -143,7 +143,7 @@ func (a *application) fail(w http.ResponseWriter, err error) {
 	case errors.Is(err, media.ErrFilename):
 		apiError(w, 422, "invalid_filename", "Provide a filename of 1 to 255 valid characters.", nil)
 	case errors.Is(err, media.ErrType):
-		apiError(w, 415, "unsupported_image", "This file does not appear to be a supported image.", nil)
+		apiError(w, 415, "unsupported_image", "This file does not appear to be supported media.", nil)
 	case errors.Is(err, media.ErrEmpty):
 		apiError(w, 422, "empty_file", "Empty files cannot be uploaded.", nil)
 	case errors.Is(err, storage.ErrTooLarge), errors.As(err, &tooLarge):

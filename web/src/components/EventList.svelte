@@ -21,7 +21,7 @@
       <article class="event-card">
         <div class="event-card-top"><h2><a href={`/admin/events/${event.id}`}>{event.name}</a></h2><span class:open={event.status === 'open'} class="badge">{event.status === 'open' ? 'Open' : event.status === 'disabled' ? 'Disabled' : 'Expired'}</span></div>
         <p class="muted">{displayDate(event.event_date)}</p>
-        <p class="media-stats">Photos: {event.media.photo_count}{#if event.max_assets !== null} / {event.max_assets}{/if} · Storage: {formatBytes(event.media.storage_bytes)}{#if event.max_bytes !== null} / {formatBytes(event.max_bytes)}{/if}</p>
+        <p class="media-stats">Files: {event.media.photo_count}{#if event.max_assets !== null} / {event.max_assets}{/if} · Storage: {formatBytes(event.media.storage_bytes)}{#if event.max_bytes !== null} / {formatBytes(event.max_bytes)}{/if}</p>
         {#if event.deleting}<p class="error">Media cleanup is pending. Open Manage and retry deletion.</p>{/if}
         <div class="event-card-bottom"><a href={event.public_url} target="_blank" rel="noopener noreferrer">Public event page ↗</a><a class="button secondary" href={`/admin/events/${event.id}`}>Manage<span class="sr-only"> {event.name}</span></a></div>
       </article>

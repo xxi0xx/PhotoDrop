@@ -14,7 +14,7 @@ import (
 var ErrClosed = errors.New("this event is no longer accepting uploads")
 var ErrSession = errors.New("upload session not found for this event")
 var ErrFilename = errors.New("provide a filename of 1 to 255 valid characters")
-var ErrType = errors.New("this file does not appear to be a supported image")
+var ErrType = errors.New("this file does not appear to be supported media")
 var ErrEmpty = errors.New("empty files cannot be uploaded")
 var ErrBusy = errors.New("uploads are in progress for this event; try deleting it again after they finish")
 var ErrDeleting = errors.New("event media cleanup is incomplete; the event is closed, retry deletion")
@@ -29,7 +29,7 @@ func ValidateFilename(name string) error {
 
 func SupportedMIME(value string) bool {
 	switch value {
-	case "image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif":
+	case "image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif", "video/mp4", "video/quicktime":
 		return true
 	}
 	return false
@@ -46,17 +46,17 @@ func ValidateDeclaredType(value string) error {
 	return nil
 }
 
-// Sniff inspects at most 512 bytes, never decodes a full image. ISO BMFF HEIF
-// files use an ftyp box. Generic video/AVIF brands alone do not qualify.
+// Sniff inspects at most 512 bytes, without decoding media or verifying codecs.
+// Parse ISO BMFF before http.DetectContentType: its MP4 heuristic does not
+// distinguish image brands or require the complete declared ftyp box.
 func Sniff(prefix []byte) (string, error) {
 	if len(prefix) == 0 {
 		return "", ErrEmpty
 	}
-	kind := http.DetectContentType(prefix)
-	if SupportedMIME(kind) {
-		return kind, nil
+	if len(prefix) > 512 {
+		prefix = prefix[:512]
 	}
-	if len(prefix) >= 16 && string(prefix[4:8]) == "ftyp" {
+	if len(prefix) >= 8 && string(prefix[4:8]) == "ftyp" {
 		size := int(binary.BigEndian.Uint32(prefix[:4]))
 		if size >= 16 && size <= len(prefix) && size <= 512 && size%4 == 0 {
 			brands := []string{string(prefix[8:12])}
@@ -65,7 +65,7 @@ func Sniff(prefix []byte) (string, error) {
 			}
 			for _, brand := range brands {
 				switch brand {
-				case "avif", "avis", "qt  ":
+				case "avif", "avis":
 					return "", ErrType
 				}
 			}
@@ -80,7 +80,43 @@ func Sniff(prefix []byte) (string, error) {
 					return "image/heif", nil
 				}
 			}
+			// A movie needs more than an isolated ftyp box. Reject missing or
+			// malformed following box headers visible in the bounded prefix.
+			if len(prefix)-size < 8 {
+				return "", ErrType
+			}
+			next := uint64(binary.BigEndian.Uint32(prefix[size : size+4]))
+			minimum := uint64(8)
+			if next == 1 {
+				if len(prefix)-size < 16 {
+					return "", ErrType
+				}
+				next = binary.BigEndian.Uint64(prefix[size+8 : size+16])
+				minimum = 16
+				if next < minimum {
+					return "", ErrType
+				}
+			}
+			if next != 0 && (next < minimum || (len(prefix) < 512 && next > uint64(len(prefix)-size))) {
+				return "", ErrType
+			}
+			for _, brand := range brands {
+				if brand == "qt  " {
+					return "video/quicktime", nil
+				}
+			}
+			// Use a conservative major-brand allowlist. Unknown/image/audio/3GP
+			// majors must not become video merely by listing isom compatibility.
+			switch brands[0] {
+			case "isom", "iso2", "iso3", "iso4", "iso5", "iso6", "iso7", "iso8", "iso9", "mp41", "mp42", "avc1", "M4V ", "MSNV":
+				return "video/mp4", nil
+			}
 		}
+		return "", ErrType
+	}
+	kind := http.DetectContentType(prefix)
+	if strings.HasPrefix(kind, "image/") && SupportedMIME(kind) {
+		return kind, nil
 	}
 	return "", ErrType
 }

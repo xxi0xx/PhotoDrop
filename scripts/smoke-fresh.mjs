@@ -7,6 +7,7 @@ import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, rmSy
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, relative } from 'node:path';
 import { photo } from './photo-fixture.mjs';
+import { video } from './video-fixture.mjs';
 
 const runAsync = promisify(execFile);
 const root=process.cwd(), dir=mkdtempSync(join(tmpdir(),'photodrop-fresh-'));
@@ -76,25 +77,31 @@ try {
     assert.equal(event.id,1,'Each storage mode must begin with empty state');
     assert.equal(event.public_url,base+'/e/'+event.public_id);
     assert.equal((await fetch(event.public_url)).status,200);
-    const bytes=photo();
+    const samples=[{name:'fresh.png',kind:'image/png',bytes:photo()},{name:'fresh.mp4',kind:'video/mp4',bytes:video()},{name:'fresh.mov',kind:'video/quicktime',bytes:video('mov')}];
     const session=(await json('POST',`/api/public/events/${event.public_id}/upload-sessions`,{contributor_name:'Fresh guest'},201,false)).body;
     assert.equal(session.upload_strategy,s3?'direct':'local');
     const path=`/api/public/events/${event.public_id}/upload-sessions/${session.upload_session.id}/assets`;
-    if(s3) {
-      const prepared=(await json('POST',path+'/prepare',{filename:'fresh.png',content_type:'image/png',size:bytes.length,request_id:randomBytes(16).toString('hex')},201,false)).body;
-      assert.equal(new URL(prepared.upload.url).origin,'http://localhost:18095');
-      assert.equal((await fetch(prepared.upload.url,{method:'PUT',headers:prepared.upload.headers,body:bytes})).status,200);
-      await json('POST',path+`/${prepared.asset.id}/complete`,{},200,false);
-    } else {
-      assert.equal((await fetch(base+path,{method:'POST',headers:{Origin:base,'Content-Type':'image/png','Content-Disposition':'attachment; filename=fresh.png'},body:bytes})).status,201);
+    for(const {name,kind,bytes} of samples) {
+      if(s3) {
+        const prepared=(await json('POST',path+'/prepare',{filename:name,content_type:kind,size:bytes.length,request_id:randomBytes(16).toString('hex')},201,false)).body;
+        assert.equal(new URL(prepared.upload.url).origin,'http://localhost:18095');
+        assert.equal((await fetch(prepared.upload.url,{method:'PUT',headers:prepared.upload.headers,body:bytes})).status,200);
+        await json('POST',path+`/${prepared.asset.id}/complete`,{},200,false);
+      } else {
+        assert.equal((await fetch(base+path,{method:'POST',headers:{Origin:base,'Content-Type':kind,'Content-Disposition':`attachment; filename=${name}`},body:bytes})).status,201);
+      }
     }
     const details=(await json('GET',`/api/admin/events/${event.id}`)).body.event;
-    assert.equal(details.media.photo_count,1);assert.equal(details.contributors[0].name,'Fresh guest');
+    assert.equal(details.media.photo_count,3);assert.equal(details.contributors[0].name,'Fresh guest');
     compose(['exec','-T','--user','10001','photodrop','photodrop','export','--event',String(event.id),'--output','/data/fresh-export'],s3);
     const manifest=JSON.parse(compose(['exec','-T','photodrop','cat','/data/fresh-export/photodrop-manifest.json'],s3,true));
-    const hash=compose(['exec','-T','photodrop','sha256sum','/data/fresh-export/photos/'+manifest.assets[0].exportFilename],s3,true).split(' ')[0];
-    assert.equal(hash,createHash('sha256').update(bytes).digest('hex'));
-    console.log(`Fresh ${s3?'S3':'local'} install: documented files, no old .env, health, login, event URL, named guest upload, export hash passed.`);
+    assert.equal(manifest.assets.length,3);
+    for(const item of manifest.assets) {
+      const source=samples.find(s=>s.name===item.originalFilename);assert.ok(source);assert.equal(item.sizeBytes,source.bytes.length);assert.equal(item.mimeType,source.kind);
+      const hash=compose(['exec','-T','photodrop','sha256sum','/data/fresh-export/photos/'+item.exportFilename],s3,true).split(' ')[0];
+      assert.equal(hash,createHash('sha256').update(source.bytes).digest('hex'));
+    }
+    console.log(`Fresh ${s3?'S3':'local'} install: documented files, no old .env, health, login, event URL, named mixed-media guest uploads, export hashes passed.`);
     await compose(['down'],s3,false,runAsync);
   }
 } finally {

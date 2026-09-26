@@ -50,7 +50,7 @@
 </script>
 <section class="section-card" aria-labelledby="immich-heading">
   <h2 id="immich-heading">Immich</h2>
-  <p class="hint">Send independent copies to Immich. Deleting this event leaves the Immich album and photos untouched. Cancel an active import before deleting the event.</p>
+  <p class="hint">Send independent copies to Immich. Deleting this event leaves the Immich album and files untouched. Cancel an active import before deleting the event.</p>
   {#if error || pollError}<p class="error" role="alert">{error || pollError}</p>{/if}
   {#if !status}<p role="status">Loading integration…</p>
   {:else if status.targets.length === 0}<p class="hint">Optional: configure a named Immich target in your deployment to enable imports.</p>
@@ -68,8 +68,8 @@
       {#if view}<p role="status">{view.label} · {view.accounted} of {status.total} accounted for</p>{/if}
       {#if status.job?.error}<p class="error">{status.job.error}</p>{/if}
       <div class="actions">
-        <button disabled={!view?.canSend} onclick={() => send('new')}>Send {view?.sendCount ?? 0} {view?.sendCount === 1 ? 'photo' : 'photos'} to Immich</button>
-        <button class="secondary" disabled={!view?.canRetry} onclick={() => send('retry')}>Retry {status.failed} failed {status.failed === 1 ? 'photo' : 'photos'}</button>
+        <button disabled={!view?.canSend} onclick={() => send('new')}>Send {view?.sendCount ?? 0} {view?.sendCount === 1 ? 'file' : 'files'} to Immich</button>
+        <button class="secondary" disabled={!view?.canRetry} onclick={() => send('retry')}>Retry {status.failed} failed {status.failed === 1 ? 'file' : 'files'}</button>
         {#if view?.active}<button class="secondary" disabled={busy || status.job?.cancel_requested} onclick={cancel}>Cancel import</button>{/if}
       </div>
     {/if}

@@ -147,13 +147,13 @@ and [R2 S3 compatibility](https://developers.cloudflare.com/r2/api/s3/api/).
 Completion uses authenticated HEAD, requires exact expected size, checks stored
 content type where supplied, and GETs `bytes=0-511` with the HEAD ETag in
 `If-Match`. Missing/inconsistent range metadata, changed objects, provider
-errors, wrong sizes, and disguised non-images cannot become ready. Reads are
-bounded even if a provider ignores Range. Gate 3's JPEG/PNG/WebP/GIF/HEIC/HEIF
-sniffing determines the final trusted MIME type. During upload finalization,
-PhotoDrop reads only that prefix and does not decode the full image. Later export
+errors, wrong sizes, and unsupported signatures cannot become ready. Reads are
+bounded even if a provider ignores Range. [Shared media signature validation](media-formats.md)
+determines the final trusted MIME type. During upload finalization,
+PhotoDrop reads only that prefix and does not decode the full media. Later export
 and Immich operations stream full ready originals from storage through PhotoDrop.
 
-Wrong-size or invalid-image objects are deleted, but the pending asset and its
+Wrong-size or invalid-media objects are deleted, but the pending asset and its
 immutable expected metadata remain for retry. If verification or its final
 database transaction fails transiently, existing bytes remain for retry.
 Concurrent finalizers serialize per asset; SQLite write transactions are short

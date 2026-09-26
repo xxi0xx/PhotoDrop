@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { photo } from './photo-fixture.mjs';
+import { video } from './video-fixture.mjs';
 
 const runAsync = promisify(execFile);
 const base = 'http://localhost:8083', immich = 'http://localhost:22830/api';
@@ -43,14 +44,14 @@ async function login() {
   cookie = result.response.headers.getSetCookie()[0].split(';')[0]; csrf = result.body.csrf_token;
 }
 async function createEvent(label) { return (await json('POST', '/api/admin/events', { name: `${label} ${randomUUID()}`, enabled: true }, 201)).body.event; }
-async function upload(event, bytes = photo(), name = 'photo.png') {
+async function upload(event, bytes = photo(), name = 'photo.png', kind = 'image/png') {
   const session = (await json('POST', `/api/public/events/${event.public_id}/upload-sessions`, {}, 201, false)).body.upload_session.id;
   const path = `/api/public/events/${event.public_id}/upload-sessions/${session}/assets`;
   if (active === 'local-default') {
-    const response = await fetch(base + path, { method: 'POST', headers: { Origin: base, 'Content-Type': 'image/png', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}` }, body: bytes });
+    const response = await fetch(base + path, { method: 'POST', headers: { Origin: base, 'Content-Type': kind, 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(name)}` }, body: bytes });
     assert.equal(response.status, 201, 'local upload failed'); return { ...(await response.json()).asset, bytes };
   }
-  const prepared = (await json('POST', path + '/prepare', { filename: name, content_type: 'image/png', size: bytes.length, request_id: randomBytes(16).toString('hex') }, 201, false)).body;
+  const prepared = (await json('POST', path + '/prepare', { filename: name, content_type: kind, size: bytes.length, request_id: randomBytes(16).toString('hex') }, 201, false)).body;
   const response = await fetch(prepared.upload.url, { method: prepared.upload.method, headers: prepared.upload.headers, body: bytes }); assert.equal(response.status, 200);
   const asset = (await json('POST', path + `/${prepared.asset.id}/complete`, {}, 200, false)).body.asset;
   return { ...asset, bytes, objectPath: new URL(prepared.upload.url).pathname, port: new URL(prepared.upload.url).port };
@@ -86,8 +87,8 @@ apiKey = key.secret; assert.ok(apiKey, 'test API key missing');
 await restart('local-default'); await login(); await control({});
 const event = await createEvent('Gate 6 lifecycle');
 const local = await upload(event);
-await restart('s3-a'); const a = await upload(event);
-await restart('s3-b'); const b = await upload(event);
+await restart('s3-a'); const a = await upload(event, video('mp4', true), 'clip.mp4', 'video/mp4');
+await restart('s3-b'); const b = await upload(event, video('mov', true), 'clip.mov', 'video/quicktime');
 const assets = [local, a, b];
 const exportPath = `/export/event-${event.id}-${randomUUID()}`;
 // Test-only volume ownership; production optional bind mounts stay operator-owned.
@@ -98,7 +99,7 @@ assert.equal(manifest.formatVersion, 1); assert.equal(manifest.assets.length, 3)
 assert.equal(new Set(manifest.assets.map(a => a.exportFilename.toLowerCase())).size, 3);
 for (const item of manifest.assets) {
   const source = assets.find(a => a.id === item.photoDropAssetId); assert.ok(source);
-  assert.equal(item.originalFilename, 'photo.png'); assert.equal(item.sizeBytes, source.bytes.length);
+  assert.equal(item.originalFilename, source.filename); assert.equal(item.sizeBytes, source.bytes.length); assert.equal(item.mimeType, source.mime_type);
   const digest = compose(['exec', '-T', 'photodrop', 'sha256sum', `${exportPath}/photos/${item.exportFilename}`], true).split(' ')[0];
   assert.equal(digest, sha(source.bytes));
 }
@@ -109,7 +110,18 @@ await json('POST', pathFor(event) + '/test', {});
 let current = await send(event);
 assert.equal(current.job.status, 'completed'); assert.equal(current.imported, 3); assert.equal(current.duplicate, 0);
 const albumID = current.album_id;
-assert.equal((await remote('GET', `/albums/${albumID}`)).assetCount, 3);
+const album = await remote('GET', `/albums/${albumID}`);
+assert.equal(album.assetCount, 3);
+// Use the test owner's session for readback; PhotoDrop's four-permission API
+// key deliberately has no search/download permission. Album info has no assets.
+const importedAssets = (await remote('POST', '/search/metadata', {albumIds:[albumID]}, 200, true)).assets.items;
+assert.equal(importedAssets.filter(asset => asset.type === 'VIDEO').length, 2);
+for (const source of [a,b]) {
+  const target = importedAssets.find(asset => asset.originalFileName === source.filename); assert.ok(target);
+  const original = await fetch(immich + `/assets/${target.id}/original`, {headers:{Authorization:`Bearer ${accessToken}`}});
+  assert.equal(original.status,200);assert.equal(sha(Buffer.from(await original.arrayBuffer())),sha(source.bytes));
+}
+console.log('Real Immich MP4/MOV import, VIDEO classification, and original-byte download hashes passed.');
 const albums = await remote('GET', '/albums'); assert.equal(albums.filter(x => x.id === albumID).length, 1);
 await remote('PATCH', `/albums/${albumID}`, { albumName: 'Renamed externally during validation' }, 200, true);
 const beforeIncrement = await control(); await upload(event); current = await send(event);

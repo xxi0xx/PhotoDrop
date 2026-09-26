@@ -22,7 +22,7 @@
     {#if notice}<p role="status" class="notice">{notice}</p>{/if}
     <p class="hint">Closing the event keeps this link and QR code unchanged.</p>
   </div><div class="qr-panel">
-    <div role="img" aria-label="Scan this QR code to open this event's public photo-sharing page"><canvas class="event-qr" bind:this={canvas} aria-hidden="true"></canvas></div>
+    <div role="img" aria-label="Scan this QR code to open this event's public media-sharing page"><canvas class="event-qr" bind:this={canvas} aria-hidden="true"></canvas></div>
     {#if qr}
       <a class="button secondary" href={qr} download={`photodrop-${publicID}-qr.png`}>Download QR</a>
     {:else if error}<p class="error" role="alert">{error}</p>{:else}<p role="status">Creating QR…</p>{/if}

@@ -94,7 +94,7 @@ func finish(t *testing.T, s *Service, e events.Event, session Session, p Prepare
 func TestDirectFormatsAndIdempotentCompletion(t *testing.T) {
 	s, _, e, session, fake, _ := directFixture(t)
 	var total int64
-	for kind, data := range testutil.Images() {
+	for kind, data := range testutil.Media() {
 		p := prepare(t, s, e, session, kind, data)
 		if p.Asset.Status != "pending" {
 			t.Fatal("premature readiness")
@@ -122,7 +122,7 @@ func TestDirectFormatsAndIdempotentCompletion(t *testing.T) {
 		}
 	}
 	stats, err := s.Stats(t.Context())
-	if err != nil || stats[e.ID].PhotoCount != 6 || stats[e.ID].StorageBytes != total {
+	if err != nil || stats[e.ID].PhotoCount != 8 || stats[e.ID].StorageBytes != total {
 		t.Fatal("incorrect ready totals", err)
 	}
 	for _, r := range fake.Requests() {
@@ -136,7 +136,7 @@ func TestDirectPrepareValidationIsolationAndRefresh(t *testing.T) {
 	s, _, e, session, _, _ := directFixture(t)
 	data := testutil.Images()["image/png"]
 	input := Preparation{"same.png", int64(len(data)), "image/png", randomID()}
-	for _, bad := range []Preparation{{"", 10, "image/png", randomID()}, {strings.Repeat("x", 256), 10, "image/png", randomID()}, {"x", 0, "image/png", randomID()}, {"x", 1025, "image/png", randomID()}, {"x", 10, "video/mp4", randomID()}, {"x", 10, "image/png", "bad"}} {
+	for _, bad := range []Preparation{{"", 10, "image/png", randomID()}, {strings.Repeat("x", 256), 10, "image/png", randomID()}, {"x", 0, "image/png", randomID()}, {"x", 1025, "image/png", randomID()}, {"x", 10, "video/webm", randomID()}, {"x", 10, "image/png", "bad"}} {
 		if _, err := s.Prepare(t.Context(), e.PublicID, session.ID, bad, 1024); err == nil {
 			t.Fatal("accepted bad metadata")
 		}

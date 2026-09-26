@@ -19,7 +19,7 @@ func TestHistoricalBackendRoutingAndMissingCredentials(t *testing.T) {
 	for _, missing := range []bool{false, true} {
 		t.Run(map[bool]string{false: "all configured", true: "missing historical credentials"}[missing], func(t *testing.T) {
 			s, dir, e, session := fixture(t)
-			data := testutil.Images()["image/png"]
+			data := testutil.Videos()["video/mp4"]
 			aStore, bStore := s3test.New(""), s3test.New("")
 			aHTTP, bHTTP := httptest.NewServer(aStore), httptest.NewServer(bStore)
 			defer aHTTP.Close()
@@ -46,9 +46,9 @@ func TestHistoricalBackendRoutingAndMissingCredentials(t *testing.T) {
 			}
 			l := upload(t, s, e, session, "local.png")
 			configure("s3-a", true)
-			pa := prepare(t, s, e, session, "image/png", data)
+			pa := prepare(t, s, e, session, "video/mp4", data)
 			put(t, pa, data)
-			stale := prepare(t, s, e, session, "image/png", data)
+			stale := prepare(t, s, e, session, "video/mp4", data)
 			put(t, stale, data)
 			s.db.Exec("UPDATE assets SET created_at='2000-01-01T00:00:00Z',authorized_until='2000-01-01T00:00:00Z' WHERE id=?", stale.Asset.ID)
 			configure("s3-b", true)
@@ -66,7 +66,7 @@ func TestHistoricalBackendRoutingAndMissingCredentials(t *testing.T) {
 			if len(bStore.Requests()) != before {
 				t.Fatal("historical HEAD/GET hit active backend")
 			}
-			pb := prepare(t, s, e, session, "image/png", data)
+			pb := prepare(t, s, e, session, "video/mp4", data)
 			put(t, pb, data)
 			finish(t, s, e, session, pb)
 			// Legacy provider/fingerprint columns are not routing authority after binding.

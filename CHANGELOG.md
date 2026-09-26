@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- MP4 and QuickTime MOV uploads alongside images, through the existing local/S3,
+  quota, export and Immich pipelines. Original bytes are preserved; no transcoding
+  or playback UI. No database migration or persisted API/schema renaming.
+
 ## [1.0.0] — 2026-09-25
 
 - Event management with permanent public links, expiration, enable/disable and QR PNGs.
