@@ -49,7 +49,7 @@ func TestImmichAdminBoundaryAndHealth(t *testing.T) {
 		return w
 	}
 	const path = "/api/admin/events/1/immich"
-	for _, route := range []struct{ method, path string }{{"GET", path}, {"POST", path + "/test"}, {"POST", path + "/jobs"}, {"POST", path + "/cancel"}} {
+	for _, route := range []struct{ method, path string }{{"GET", "/api/admin/immich/targets"}, {"POST", path + "/album"}, {"GET", path}, {"POST", path + "/test"}, {"POST", path + "/jobs"}, {"POST", path + "/cancel"}} {
 		if w := call(route.method, route.path, "{}", nil, "", "http://photos.test"); w.Code != 401 {
 			t.Fatal("anonymous integration access", w.Code)
 		}
@@ -63,7 +63,7 @@ func TestImmichAdminBoundaryAndHealth(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &session); err != nil {
 		t.Fatal(err)
 	}
-	for _, suffix := range []string{"/test", "/jobs", "/cancel"} {
+	for _, suffix := range []string{"/test", "/jobs", "/cancel", "/album"} {
 		if w := call("POST", path+suffix, "{}", cookie, "", "http://photos.test"); w.Code != 403 {
 			t.Fatal("missing CSRF accepted")
 		}

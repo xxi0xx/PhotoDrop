@@ -47,6 +47,7 @@ services:
       PHOTODROP_S3_S3_B_SECRET_ACCESS_KEY: test-s3-secret-for-local-tests-only
       PHOTODROP_IMMICH_TARGET: integration-test
       PHOTODROP_IMMICH_INTEGRATION_TEST_URL: http://localhost:2284
+      PHOTODROP_IMMICH_INTEGRATION_TEST_PUBLIC_URL: http://localhost:22830
       PHOTODROP_IMMICH_INTEGRATION_TEST_API_KEY: '${PHOTODROP_TEST_IMMICH_KEY:-}'
     volumes:
       - photodrop-data:/data

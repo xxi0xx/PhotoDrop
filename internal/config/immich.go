@@ -7,8 +7,9 @@ import (
 )
 
 type Immich struct {
-	URL    string
-	APIKey string `json:"-"`
+	URL       string
+	PublicURL string
+	APIKey    string `json:"-"`
 }
 
 func (Immich) String() string     { return "Immich configuration (credentials redacted)" }
@@ -64,6 +65,14 @@ func (c *Config) loadImmich(lookup func(string) (string, bool)) error {
 		}
 		prefix := "PHOTODROP_IMMICH_" + strings.ToUpper(strings.ReplaceAll(key, "-", "_")) + "_"
 		raw, _ := lookup(prefix + "URL")
+		public, _ := lookup(prefix + "PUBLIC_URL")
+		if public != "" {
+			var err error
+			public, err = NormalizeImmichURL(public)
+			if err != nil {
+				return errors.New("Immich PUBLIC_URL must be an http(s) origin without credentials, path, query, or fragment")
+			}
+		}
 		secret, _ := lookup(prefix + "API_KEY")
 		if len(secret) > 4096 || strings.ContainsAny(secret, "\x00\r\n") {
 			return errors.New("Immich API key contains invalid characters or is too long")
@@ -71,14 +80,14 @@ func (c *Config) loadImmich(lookup func(string) (string, bool)) error {
 		// Missing credentials may be intentional for a historical target. An
 		// absent URL also defers to its persisted identity without enabling it.
 		if raw == "" && secret == "" {
-			c.ImmichTargets[key] = Immich{}
+			c.ImmichTargets[key] = Immich{PublicURL: public}
 			continue
 		}
 		base, err := NormalizeImmichURL(raw)
 		if err != nil {
 			return err
 		}
-		c.ImmichTargets[key] = Immich{URL: base, APIKey: secret}
+		c.ImmichTargets[key] = Immich{URL: base, APIKey: secret, PublicURL: public}
 	}
 	return nil
 }

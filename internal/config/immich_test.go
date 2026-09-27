@@ -1,6 +1,29 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestImmichPublicURL(t *testing.T) {
+	for _, raw := range []string{"", "https://PHOTOS.EXAMPLE:443/", "http://localhost:2283", "javascript:alert(1)", "https://user:secret@photos.test", "https://photos.test/api", "https://photos.test?secret=hidden", "https://photos.test#fragment"} {
+		t.Run(raw, func(t *testing.T) {
+			values := map[string]string{"PHOTODROP_IMMICH_TARGET": "home", "PHOTODROP_IMMICH_HOME_PUBLIC_URL": raw}
+			var cfg Config
+			err := cfg.loadImmich(func(k string) (string, bool) { v, ok := values[k]; return v, ok })
+			expected, validation := NormalizeImmichURL(raw)
+			if raw != "" && validation != nil {
+				if err == nil || strings.Contains(err.Error(), raw) {
+					t.Fatal("invalid origin accepted/leaked", err)
+				}
+				return
+			}
+			if err != nil || cfg.ImmichTargets["home"].PublicURL != expected {
+				t.Fatal(cfg, err)
+			}
+		})
+	}
+}
 
 func TestImmichConfig(t *testing.T) {
 	values := map[string]string{"PHOTODROP_IMMICH_TARGET": "home", "PHOTODROP_IMMICH_HOME_URL": "https://PHOTOS.EXAMPLE:443/", "PHOTODROP_IMMICH_HOME_API_KEY": "runtime-secret"}

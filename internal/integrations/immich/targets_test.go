@@ -26,13 +26,13 @@ func TestTargetIdentityAndSecrets(t *testing.T) {
 	if err != nil || !target.Available {
 		t.Fatal(err)
 	}
-	cfg.ImmichTargets["home"] = config.Immich{URL: "https://photos.example", APIKey: "rotated-runtime-secret"}
+	cfg.ImmichTargets["home"] = config.Immich{URL: "https://photos.example", APIKey: "rotated-runtime-secret", PublicURL: "https://browser.example"}
 	two, err := Reconcile(t.Context(), db, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	same, _ := two.ByKey("home")
-	if same.ID != target.ID {
+	if same.ID != target.ID || same.PublicURL != "https://browser.example" {
 		t.Fatal("normalized target changed identity")
 	}
 	cfg.ImmichTargets["home"] = config.Immich{URL: "https://another.example", APIKey: "secret"}
@@ -56,7 +56,7 @@ func TestTargetIdentityAndSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{"target-secret-never-persist", "rotated-runtime-secret"} {
+	for _, secret := range []string{"target-secret-never-persist", "rotated-runtime-secret", "browser.example"} {
 		if strings.Contains(string(disk), secret) {
 			t.Fatal("secret persisted")
 		}

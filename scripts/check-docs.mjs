@@ -32,5 +32,5 @@ for (const name of new Set(source.match(/PHOTODROP_[A-Z_]+/g))) {
   assert.ok(reference.includes(name), `Missing configuration documentation: ${name}`);
 }
 for (const suffix of ['BUCKET','REGION','ENDPOINT','PREFIX','ACCESS_KEY_ID','SECRET_ACCESS_KEY','SESSION_TOKEN','PATH_STYLE','PRESIGN_TTL']) assert.ok(reference.includes(`PHOTODROP_S3_${suffix}`));
-for (const suffix of ['URL','API_KEY']) assert.ok(reference.includes(`PHOTODROP_IMMICH_<KEY>_${suffix}`));
+for (const suffix of ['URL','PUBLIC_URL','API_KEY']) assert.ok(reference.includes(`PHOTODROP_IMMICH_<KEY>_${suffix}`));
 console.log(`Validated ${files.length} Markdown files, ${links} local links/anchors, and production environment coverage. External links require separate review.`);

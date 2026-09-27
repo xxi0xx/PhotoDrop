@@ -14,6 +14,7 @@ type Target struct {
 	ID        int64  `json:"id"`
 	Key       string `json:"key"`
 	Available bool   `json:"available"`
+	PublicURL string `json:"public_url,omitempty"`
 	client    API
 }
 type Targets struct {
@@ -68,6 +69,13 @@ func Reconcile(ctx context.Context, db *sql.DB, cfg config.Config) (*Targets, er
 			return nil, err
 		}
 		one := cfg.ImmichTargets[t.Key]
+		if one.PublicURL != "" {
+			t.PublicURL, err = config.NormalizeImmichURL(one.PublicURL)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+		}
 		if one.APIKey != "" && one.URL != "" {
 			client, err := NewClient(config.Immich{URL: base, APIKey: one.APIKey})
 			if err != nil {
@@ -99,6 +107,22 @@ func (t *Targets) ByKey(key string) (Target, error) {
 		}
 	}
 	return Target{}, ErrCredentials
+}
+
+type TargetCatalog struct {
+	ActiveTarget string   `json:"active_target"`
+	Targets      []Target `json:"targets"`
+}
+
+// Discovery is local configuration only, not a health probe. Internal API URLs
+// and credentials never appear in Target's JSON representation.
+func (s *Service) TargetCatalog() TargetCatalog {
+	result := TargetCatalog{ActiveTarget: s.targets.ActiveKey, Targets: []Target{}}
+	for _, one := range s.targets.entries {
+		result.Targets = append(result.Targets, one)
+	}
+	sort.Slice(result.Targets, func(i, j int) bool { return result.Targets[i].Key < result.Targets[j].Key })
+	return result
 }
 func (t *Targets) client(id int64) (API, error) {
 	one, ok := t.entries[id]

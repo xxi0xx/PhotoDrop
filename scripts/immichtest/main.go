@@ -18,12 +18,16 @@ import (
 )
 
 type faultState struct {
-	FailNext   bool `json:"fail_next"`
-	LoseNext   bool `json:"lose_next"`
-	DelayMS    int  `json:"delay_ms"`
-	Uploads    int  `json:"uploads"`
-	Created    int  `json:"created"`
-	Duplicates int  `json:"duplicates"`
+	FailValidate bool `json:"fail_validate"`
+	LoseAlbum    bool `json:"lose_album"`
+	AlbumDelayMS int  `json:"album_delay_ms"`
+	AlbumCreates int  `json:"album_creates"`
+	FailNext     bool `json:"fail_next"`
+	LoseNext     bool `json:"lose_next"`
+	DelayMS      int  `json:"delay_ms"`
+	Uploads      int  `json:"uploads"`
+	Created      int  `json:"created"`
+	Duplicates   int  `json:"duplicates"`
 }
 
 func main() {
@@ -35,6 +39,24 @@ func main() {
 	var mu sync.Mutex
 	var state faultState
 	proxy.ModifyResponse = func(r *http.Response) error {
+		if r.Request.Method == "POST" && r.Request.URL.Path == "/api/albums" && r.StatusCode < 300 {
+			mu.Lock()
+			state.AlbumCreates++
+			lose, delay := state.LoseAlbum, state.AlbumDelayMS
+			state.LoseAlbum = false
+			mu.Unlock()
+			if delay > 0 {
+				select {
+				case <-r.Request.Context().Done():
+					return r.Request.Context().Err()
+				case <-time.After(time.Duration(delay) * time.Millisecond):
+				}
+			}
+			if lose {
+				r.Body.Close()
+				return errors.New("test-only lost album response after real acceptance")
+			}
+		}
 		if r.Request.Method != "POST" || r.Request.URL.Path != "/api/assets" || r.StatusCode >= 300 {
 			return nil
 		}
@@ -76,8 +98,18 @@ func main() {
 				state.FailNext = input.FailNext
 				state.LoseNext = input.LoseNext
 				state.DelayMS = input.DelayMS
+				state.FailValidate = input.FailValidate
+				state.LoseAlbum = input.LoseAlbum
+				state.AlbumDelayMS = input.AlbumDelayMS
 			}
 			json.NewEncoder(w).Encode(state)
+			return
+		}
+		mu.Lock()
+		failValidate := state.FailValidate
+		mu.Unlock()
+		if failValidate && r.URL.Path == "/api/api-keys/me" {
+			http.Error(w, "test-only Immich outage", 503)
 			return
 		}
 		if r.Method == "POST" && r.URL.Path == "/api/assets" {

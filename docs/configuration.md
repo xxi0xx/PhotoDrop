@@ -72,12 +72,15 @@ See [backend configuration](storage-backends.md).
 | --- | --- | --- | --- |
 | `PHOTODROP_IMMICH_TARGET` | empty | Active target key; backend-key grammar | Identifier |
 | `PHOTODROP_IMMICH_TARGETS` | Active target when omitted | Up to 32 comma-separated unique keys | Identifiers |
-| `PHOTODROP_IMMICH_<KEY>_URL` | empty | HTTP(S) origin; one URL for server API/browser links; immutable identity | Addressing |
+| `PHOTODROP_IMMICH_<KEY>_URL` | empty | HTTP(S) origin used for server API requests; immutable identity | Internal addressing |
+| `PHOTODROP_IMMICH_<KEY>_PUBLIC_URL` | empty / optional | HTTP(S) browser origin without credentials, path, query or fragment; enables album navigation; restart required | Public addressing, never secret |
 | `PHOTODROP_IMMICH_<KEY>_API_KEY` | empty | Up to 4096 bytes, no NUL/newline; required for operations | Secret |
 
 Use uppercase/underscore key substitution. Historical targets can omit URL/key and
 remain unavailable without erasing identity. Rotate keys for the same server/account;
-another server needs a new target key. No separate internal/public URL exists.
+another server needs a new target key. The optional PUBLIC_URL is runtime-only,
+may change without changing target identity, and is never used for API requests.
+Without it, the admin shows no browser album link.
 See [Immich](export-immich.md) for API permissions.
 
 Export reads DATA_DIR and storage configuration only; there are no additional

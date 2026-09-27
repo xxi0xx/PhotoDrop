@@ -149,13 +149,25 @@ func expiryValue(t *time.Time) any {
 }
 
 func (s *Store) Create(ctx context.Context, input Input) (Event, error) {
+	return create(ctx, s.db, input)
+}
+
+// CreateInTx lets the application atomically attach local setup to a new event.
+// The caller owns commit/rollback; no external I/O belongs in this transaction.
+func CreateInTx(ctx context.Context, tx *sql.Tx, input Input) (Event, error) {
+	return create(ctx, tx, input)
+}
+
+func create(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, input Input) (Event, error) {
 	e, err := validate(input)
 	if err != nil {
 		return Event{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for range 3 {
-		row := s.db.QueryRowContext(ctx, `INSERT INTO events
+		row := db.QueryRowContext(ctx, `INSERT INTO events
 		    (public_id, name, description, event_date, enabled, expires_at, created_at, updated_at, max_assets, max_bytes)
 		    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(public_id) DO NOTHING RETURNING `+columns,
 			newPublicID(), e.Name, e.Description, e.EventDate, e.Enabled, expiryValue(e.ExpiresAt), now, now, e.MaxAssets, e.MaxBytes)

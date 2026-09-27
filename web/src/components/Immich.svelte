@@ -41,6 +41,12 @@
     catch (cause) { error = message(cause); }
     finally { busy = false; }
   }
+  async function provision() {
+    busy = true; error = '';
+    try { await request(`${path}/album`, 'POST', {target, album_name:albumName}); await refresh(); }
+    catch (cause) { error = message(cause); await refresh(); }
+    finally { busy = false; }
+  }
   async function cancel() {
     busy = true;
     try { await request(`${path}/cancel`, 'POST', { target }); await refresh(); }
@@ -62,14 +68,18 @@
     {#if status.target}
       <div class="actions"><button class="secondary" disabled={busy || !status.target.available} onclick={testConnection}>{testing ? 'Testing connection…' : 'Test Immich connection'}</button></div>
       {#if connection}<p role="status">{connection}</p>{/if}
-      <div class="field"><label for="immich-album">Album name</label><input id="immich-album" maxlength="200" bind:value={albumName} disabled={!!status.album_id || busy || view?.active} /><p class="hint">Choose a name before the first import. Later imports use the same album, even if you rename it in Immich.</p></div>
+      <div class="field"><label for="immich-album">Album name</label><input id="immich-album" maxlength="200" bind:value={albumName} disabled={!!status.album_id || status.album_state === 'creating' || busy || view?.active} /><p class="hint">Choose a name before album setup. Later imports use the same album, even if you rename it in Immich.</p></div>
+      <p role="status">{view?.albumLabel}</p>
+      {#if status.album_url}<a class="button secondary" href={status.album_url} target="_blank" rel="noopener noreferrer">Open in Immich</a>{/if}
+      {#if !status.target.available}<p class="notice">Target credentials are unavailable. Restore them in the deployment configuration before retrying.</p>{/if}
+      {#if !status.album_id && status.imported + status.duplicate + status.failed + status.pending === 0}<button disabled={!view?.canProvision} onclick={provision}>{status.job ? 'Retry album setup' : 'Create Immich album'}</button><p class="hint">Creates the album without sending any media. Uploads are never imported automatically.</p>{/if}
       <dl class="stat-grid"><div><dt>Imported</dt><dd>{status.imported + status.duplicate}</dd></div><div><dt>Not yet imported</dt><dd>{status.new + status.pending}</dd></div><div><dt>Failed</dt><dd>{status.failed}</dd></div></dl>
       {#if status.duplicate}<p class="hint">{status.duplicate} already existed in Immich and are accounted for.</p>{/if}
-      {#if view}<p role="status">{view.label} · {view.accounted} of {status.total} accounted for</p>{/if}
+      {#if view && status.total > 0}<p role="status">{view.label} · {view.accounted} of {status.total} accounted for</p>{/if}
       {#if status.job?.error}<p class="error">{status.job.error}</p>{/if}
       <div class="actions">
         <button disabled={!view?.canSend} onclick={() => send('new')}>Send {view?.sendCount ?? 0} {view?.sendCount === 1 ? 'file' : 'files'} to Immich</button>
-        <button class="secondary" disabled={!view?.canRetry} onclick={() => send('retry')}>Retry {status.failed} failed {status.failed === 1 ? 'file' : 'files'}</button>
+        <button class="secondary" disabled={!view?.canRetry} onclick={() => send('retry')}>Retry unfinished import</button>
         {#if view?.active}<button class="secondary" disabled={busy || status.job?.cancel_requested} onclick={cancel}>Cancel import</button>{/if}
       </div>
     {/if}

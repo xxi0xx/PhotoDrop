@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"photodrop/internal/events"
 	"photodrop/internal/media"
 )
 
@@ -44,6 +45,8 @@ type Status struct {
 	Target       *Target  `json:"target,omitempty"`
 	AlbumName    string   `json:"album_name"`
 	AlbumID      string   `json:"album_id,omitempty"`
+	AlbumState   string   `json:"album_state"`
+	AlbumURL     string   `json:"album_url,omitempty"`
 	Total        int64    `json:"total"`
 	Imported     int64    `json:"imported"`
 	Duplicate    int64    `json:"duplicate"`
@@ -59,24 +62,14 @@ func (s *Service) Status(ctx context.Context, eventID int64, key string) (Status
 		return Status{}, err
 	}
 	result := Status{ActiveTarget: s.targets.ActiveKey, Targets: []Target{}, AlbumName: name}
-	// Include persisted historical targets so their state remains inspectable
-	// even if an operator has temporarily removed their API key.
-	rows, err := s.db.QueryContext(ctx, "SELECT id FROM immich_targets ORDER BY key")
-	if err != nil {
-		return result, err
-	}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+	result.Targets = s.TargetCatalog().Targets
+	if key == "" {
+		// Show the event's existing binding on redirect, even when it differs from
+		// the deployment default. An explicit selection still wins.
+		err := s.db.QueryRowContext(ctx, "SELECT t.key FROM immich_event_imports i JOIN immich_targets t ON t.id=i.target_id WHERE i.event_id=? ORDER BY i.id DESC LIMIT 1", eventID).Scan(&key)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return result, err
 		}
-		result.Targets = append(result.Targets, s.targets.entries[id])
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return result, err
 	}
 	t, err := s.targets.ByKey(key)
 	if err != nil {
@@ -87,9 +80,12 @@ func (s *Service) Status(ctx context.Context, eventID int64, key string) (Status
 	}
 	result.Target = &t
 	var importID int64
-	err = s.db.QueryRowContext(ctx, "SELECT id,album_name,COALESCE(immich_album_id,'') FROM immich_event_imports WHERE event_id=? AND target_id=?", eventID, t.ID).Scan(&importID, &result.AlbumName, &result.AlbumID)
+	err = s.db.QueryRowContext(ctx, "SELECT id,album_name,COALESCE(immich_album_id,''),album_state FROM immich_event_imports WHERE event_id=? AND target_id=?", eventID, t.ID).Scan(&importID, &result.AlbumName, &result.AlbumID, &result.AlbumState)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return result, err
+	}
+	if result.AlbumID != "" && t.PublicURL != "" && uuid.MatchString(result.AlbumID) {
+		result.AlbumURL = t.PublicURL + "/albums/" + result.AlbumID
 	}
 	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(i.status='imported'),0),COALESCE(SUM(i.status='duplicate'),0),COALESCE(SUM(i.status='failed'),0),COALESCE(SUM(i.status IN ('pending','importing')),0),COALESCE(SUM(i.asset_id IS NULL),0)
 	 FROM assets a LEFT JOIN immich_asset_imports i ON i.asset_id=a.id AND i.event_import_id=? WHERE a.event_id=? AND a.status='ready'`, importID, eventID).Scan(&result.Total, &result.Imported, &result.Duplicate, &result.Failed, &result.Pending, &result.New)
@@ -123,6 +119,64 @@ func (s *Service) Test(ctx context.Context, key string) (Version, error) {
 }
 
 func (s *Service) Enqueue(ctx context.Context, eventID int64, key, name, mode string) (int64, error) {
+	return s.enqueue(ctx, eventID, key, name, mode, false)
+}
+
+// Provision selects no media, including media uploaded while this job runs.
+// It reuses an ordinary durable job with an empty import selection.
+func (s *Service) Provision(ctx context.Context, eventID int64, key, name string) (int64, error) {
+	return s.enqueue(ctx, eventID, key, name, "new", true)
+}
+
+func (s *Service) CreateEvent(ctx context.Context, input events.Input, key, name string) (events.Event, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return events.Event{}, err
+	}
+	defer tx.Rollback()
+	event, err := events.CreateInTx(ctx, tx, input)
+	if err != nil {
+		return events.Event{}, err
+	}
+	// A known target with temporarily absent credentials is still bound durably;
+	// the worker records the failure while the event remains usable.
+	_, err = s.enqueueTx(ctx, tx, event.ID, key, name, "new", true, false)
+	if err != nil {
+		return events.Event{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return events.Event{}, err
+	}
+	s.notify()
+	return event, nil
+}
+
+func (s *Service) enqueue(ctx context.Context, eventID int64, key, name, mode string, albumOnly bool) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	id, err := s.enqueueTx(ctx, tx, eventID, key, name, mode, albumOnly, true)
+	if err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	s.logger.Info("Immich job created", "job_id", id, "event_id", eventID)
+	s.notify()
+	return id, nil
+}
+
+func (s *Service) notify() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Service) enqueueTx(ctx context.Context, tx *sql.Tx, eventID int64, key, name, mode string, albumOnly, requireCredentials bool) (int64, error) {
 	name = strings.TrimSpace(name)
 	if (mode != "new" && mode != "retry") || utf8.RuneCountInString(name) > 200 || !utf8.ValidString(name) || strings.ContainsAny(name, "\x00\r\n") {
 		return 0, ErrInput
@@ -131,14 +185,11 @@ func (s *Service) Enqueue(ctx context.Context, eventID int64, key, name, mode st
 	if err != nil {
 		return 0, err
 	}
-	if _, err := s.targets.client(t.ID); err != nil {
-		return 0, err
+	if requireCredentials {
+		if _, err := s.targets.client(t.ID); err != nil {
+			return 0, err
+		}
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
 	var eventName string
 	var deleting bool
 	if err := tx.QueryRowContext(ctx, "SELECT name,deleting FROM events WHERE id=?", eventID).Scan(&eventName, &deleting); err != nil {
@@ -147,11 +198,18 @@ func (s *Service) Enqueue(ctx context.Context, eventID int64, key, name, mode st
 	if deleting {
 		return 0, media.ErrDeleting
 	}
-	if name == "" {
-		name = eventName
-	}
 	var importID int64
-	err = tx.QueryRowContext(ctx, "SELECT id FROM immich_event_imports WHERE event_id=? AND target_id=?", eventID, t.ID).Scan(&importID)
+	var storedName string
+	err = tx.QueryRowContext(ctx, "SELECT id,album_name FROM immich_event_imports WHERE event_id=? AND target_id=?", eventID, t.ID).Scan(&importID, &storedName)
+	if name == "" {
+		name = storedName
+		if name == "" {
+			name = eventName
+		}
+	}
+	if strings.ContainsAny(name, "\x00\r\n") {
+		return 0, ErrInput
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		var token [16]byte
 		rand.Read(token[:])
@@ -166,6 +224,7 @@ func (s *Service) Enqueue(ctx context.Context, eventID int64, key, name, mode st
 	} else if err != nil {
 		return 0, err
 	}
+	err = nil // A newly inserted binding has handled sql.ErrNoRows.
 	var active bool
 	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM integration_jobs WHERE event_import_id=? AND status IN ('queued','running'))", importID).Scan(&active); err != nil {
 		return 0, err
@@ -176,7 +235,17 @@ func (s *Service) Enqueue(ctx context.Context, eventID int64, key, name, mode st
 	if _, err := tx.ExecContext(ctx, "UPDATE immich_event_imports SET album_name=?,updated_at=? WHERE id=? AND album_state='new'", name, now(), importID); err != nil {
 		return 0, err
 	}
-	if mode == "new" {
+	if albumOnly {
+		var selected bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM immich_asset_imports WHERE event_import_id=?)", importID).Scan(&selected); err != nil {
+			return 0, err
+		}
+		// A previous manual import owns its selected media. Use its normal retry,
+		// rather than relabeling it as album-only work.
+		if selected {
+			return 0, ErrInput
+		}
+	} else if mode == "new" {
 		_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO immich_asset_imports(event_import_id,asset_id,created_at,updated_at) SELECT ?,id,?,? FROM assets WHERE event_id=? AND status='ready'`, importID, now(), now(), eventID)
 	} else {
 		_, err = tx.ExecContext(ctx, "UPDATE immich_asset_imports SET status='pending',last_error='',updated_at=? WHERE event_import_id=? AND status IN ('failed','importing')", now(), importID)
@@ -191,14 +260,6 @@ func (s *Service) Enqueue(ctx context.Context, eventID int64, key, name, mode st
 	id, err := result.LastInsertId()
 	if err != nil {
 		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	s.logger.Info("Immich job created", "job_id", id, "event_id", eventID, "target", t.Key)
-	select {
-	case s.wake <- struct{}{}:
-	default:
 	}
 	return id, nil
 }
@@ -338,7 +399,7 @@ func (s *Service) execute(parent context.Context, j Job) {
 		return
 	}
 	if requested {
-		status, message = "cancelled", "Unfinished photos can be sent again"
+		status, message = "cancelled", "Unfinished media can be sent again"
 	}
 	if _, err := s.db.ExecContext(finish, "UPDATE integration_jobs SET status=?,finished_at=?,last_error=? WHERE id=?", status, now(), message, j.ID); err != nil {
 		s.logger.Error("Immich job progress could not be saved", "job_id", j.ID)
