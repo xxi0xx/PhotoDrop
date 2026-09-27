@@ -48,7 +48,7 @@ func TestGate6ContributorUpgrade(t *testing.T) {
 		if err := db.QueryRow("SELECT e.name,a.status,a.size_bytes,u.contributor_name,a.contributor_name,i.immich_album_id FROM events e JOIN assets a ON a.event_id=e.id JOIN upload_sessions u ON u.id=a.upload_session_id JOIN immich_event_imports i ON i.event_id=e.id WHERE e.id=1").Scan(&name, &state, &size, &sessionName, &assetName, &album); err != nil {
 			t.Fatal(err)
 		}
-		if migrationCount(t, db) != 9 || before != after || name != "Existing Gate 6" || state != "ready" || size != 77 || sessionName != nil || assetName != nil || album != "remote-album" {
+		if migrationCount(t, db) != 10 || before != after || name != "Existing Gate 6" || state != "ready" || size != 77 || sessionName != nil || assetName != nil || album != "remote-album" {
 			t.Fatal("history or existing data changed")
 		}
 		db.Close()

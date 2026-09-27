@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { message, request } from '../lib/api';
-  import { importView, type ImmichStatus } from '../lib/immich';
+  import { importView, automaticImportHint, type ImmichStatus } from '../lib/immich';
   let { eventID, deleting = false }: { eventID: number; deleting?: boolean } = $props();
   let status = $state<ImmichStatus>();
   let target = $state(''); let albumName = $state(''); let error = $state('');
@@ -47,6 +47,12 @@
     catch (cause) { error = message(cause); await refresh(); }
     finally { busy = false; }
   }
+  async function setAutomatic(enabled: boolean) {
+    busy = true; error = '';
+    try { await request(`${path}/auto-import`, 'PUT', {target, auto_import:enabled}); }
+    catch (cause) { error = message(cause); }
+    finally { await refresh(); busy = false; }
+  }
   async function cancel() {
     busy = true;
     try { await request(`${path}/cancel`, 'POST', { target }); await refresh(); }
@@ -71,8 +77,11 @@
       <div class="field"><label for="immich-album">Album name</label><input id="immich-album" maxlength="200" bind:value={albumName} disabled={!!status.album_id || status.album_state === 'creating' || busy || view?.active} /><p class="hint">Choose a name before album setup. Later imports use the same album, even if you rename it in Immich.</p></div>
       <p role="status">{view?.albumLabel}</p>
       {#if status.album_url}<a class="button secondary" href={status.album_url} target="_blank" rel="noopener noreferrer">Open in Immich</a>{/if}
+      {#if status.album_state}
+        <div class="field"><label class="checkbox" for="auto-import"><input id="auto-import" type="checkbox" checked={!!status.auto_import} disabled={busy || deleting} onchange={event => setAutomatic(event.currentTarget.checked)} />Automatically send new uploads to Immich</label><p class="hint">{automaticImportHint(!!status.auto_import)} Turning this off preserves both applications' media and import history. Copies remain independent; this is not two-way sync.</p></div>
+      {/if}
       {#if !status.target.available}<p class="notice">Target credentials are unavailable. Restore them in the deployment configuration before retrying.</p>{/if}
-      {#if !status.album_id && status.imported + status.duplicate + status.failed + status.pending === 0}<button disabled={!view?.canProvision} onclick={provision}>{status.job ? 'Retry album setup' : 'Create Immich album'}</button><p class="hint">Creates the album without sending any media. Uploads are never imported automatically.</p>{/if}
+      {#if !status.album_id && status.imported + status.duplicate + status.failed + status.pending === 0}<button disabled={!view?.canProvision} onclick={provision}>{status.job ? 'Retry album setup' : 'Create Immich album'}</button><p class="hint">Creates the album without sending media. If automatic import is enabled, waiting uploads are selected afterward.</p>{/if}
       <dl class="stat-grid"><div><dt>Imported</dt><dd>{status.imported + status.duplicate}</dd></div><div><dt>Not yet imported</dt><dd>{status.new + status.pending}</dd></div><div><dt>Failed</dt><dd>{status.failed}</dd></div></dl>
       {#if status.duplicate}<p class="hint">{status.duplicate} already existed in Immich and are accounted for.</p>{/if}
       {#if view && status.total > 0}<p role="status">{view.label} · {view.accounted} of {status.total} accounted for</p>{/if}

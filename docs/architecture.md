@@ -31,3 +31,13 @@ labels. Limits/quotas bound abuse; signature sniffing is not malware analysis.
 Export streams ready assets to ordinary files/manifest. Immich jobs persist/recover
 in SQLite; Immich remains independent with separate originals/backups. Credentials
 stay in runtime configuration, never frontend bundles or backend identity records.
+
+Immich automatic import is an opt-in policy on each event/target binding. The
+existing worker reconciles ready, never-selected assets at startup, periodically,
+and after jobs. Bounded keyset pages visit 32 bindings and select up to 256 assets
+per binding. An immediate SQLite transaction inserts selection rows and one job;
+the partial unique active-job index is the final concurrency guard. Later uploads
+remain discoverable without in-memory notifications, including after restart.
+Failed selections require manual retry; failed provisioning is never automatically
+retried. Upload HTTP handlers do not call or wait for Immich. See the
+[operating semantics](export-immich.md#automatic-import-unreleased-v11).

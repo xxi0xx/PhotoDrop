@@ -63,6 +63,9 @@ for reads, deletes, export and pending finalization.
 
 Immich needs independent backups. Restored import mappings are bookkeeping, not
 proof that remote copies exist. Inspect queued jobs before exposing restored state:
-workers resume on startup. Isolate the network or withhold Immich keys during
+workers resume on startup. Migration 010 also persists each binding's automatic
+import policy. Enabled, ready bindings reconcile untracked media after restore;
+turn the policy off if the restored copy must not select new work. Isolate the
+network or withhold Immich keys during
 verification, then restore matching credentials. See [upgrading](upgrading.md)
 and [tested scenarios](gate-8-validation.md).

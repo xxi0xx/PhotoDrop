@@ -215,9 +215,36 @@ A brand-new target needs its API origin configured once to establish its identit
 
 Album setup works with zero media. The management page shows preparing, ready,
 or needs-attention state. Existing events can use **Create Immich album** too.
-This selects no media, including files arriving while setup runs. Uploading media
-never schedules an import: **Send to Immich** remains an explicit administrator
-action. Without optional setup, event creation is unchanged.
+This selects no media, including files arriving while setup runs. Automatic import
+is opt-in and defaults off; otherwise use **Send to Immich**. Without optional
+setup, event creation is unchanged.
+
+### Automatic import (unreleased v1.1)
+
+Select **Automatically send new uploads to Immich** during optional event setup,
+or toggle it on an existing event/target binding. Each target has its own setting.
+Enabling it selects both new uploads and already-ready media never selected for
+that binding, once its album is ready. Guest completion never waits for Immich.
+
+The existing worker reconciles SQLite at startup, after jobs finish, and every
+five seconds while idle. Each pass visits at most 32 bindings and selects at most
+256 ready assets per binding. Larger backlogs use additional batches; other active
+jobs can delay reconciliation. Selection and one event-level job commit together;
+a database unique index prevents two queued/running jobs for one binding. Uploads
+arriving during work remain untracked until a later pass creates a follow-up job.
+No upload notification is required: the durable ready/import rows make lost wakes
+and restart safe. Reconciliation itself makes no Immich requests.
+
+Failed selected media stays failed until **Retry unfinished import**, including
+failures before the first upload. New, never-selected media can form another batch
+without retrying old failures. Failed album setup still needs **Retry album setup**;
+provisioning selects zero media, then automatic reconciliation can select its backlog.
+
+Turning automatic import off stops future selection; already queued/running work
+may finish. It preserves both applications' media and import history. Explicit
+cancellation leaves unfinished selected work for **Send to Immich** and pauses
+automatic selection on that binding until that work is resumed. These are independent
+copies, not two-way synchronization. Manual Send and Retry remain available.
 
 If setup fails, the event, guest page and uploads remain available. Restore
 credentials/connectivity and choose **Retry album setup**. Failed jobs do not
@@ -232,14 +259,17 @@ and CSRF validation):
   availability, configured active target and optional browser origin. It performs
   no health probe and never returns internal API origins or API keys.
 - `POST /api/admin/events` accepts optional
-  `"immich":{"target":"home","album_name":"Wedding"}`. Success remains 201 with
+  `"immich":{"target":"home","album_name":"Wedding","auto_import":false}`. Success remains 201 with
   the event. Invalid configuration rolls back both event and binding.
 - `POST /api/admin/events/{id}/immich/album` accepts `target` and optional
   `album_name`, returning 202 with `job_id`. Empty names use the stored name or
   event name. Album-only work uses an existing `new` job with no selected assets;
-  no schema migration or second worker is introduced.
+  no second worker is introduced.
+- `PUT /api/admin/events/{id}/immich/auto-import` accepts `target` and required
+  boolean `auto_import` for an existing binding, returning 204. It performs no
+  remote I/O. Migration 010 adds the opt-in policy, defaulting all bindings off.
 - Existing `GET /api/admin/events/{id}/immich` adds `album_state` and optional
-  `album_url`. Without an explicit target query it shows the event's latest
+  `album_url`, plus boolean `auto_import`. Without an explicit target query it shows the event's latest
   binding, then falls back to the deployment default.
 
 For manual imports, open the existing Immich panel, test the target connection,
@@ -341,7 +371,9 @@ four required permissions. It also starts two signed S3 test endpoints and a
 test-only proxy that forces failures/response loss against the **real** Immich
 API. The proxy cannot be selected by the production executable.
 
-The smoke script validates early/empty provisioning, outage isolation, manual
+The smoke script validates automatic image/MP4/MOV imports, gated burst/coalescing,
+uploads during active work, disable/enable backlog, restart discovery, and failed
+rows requiring manual retry. It also validates early/empty provisioning, outage isolation, manual
 retry, lost album response and restart recovery without duplicate albums,
 mixed export hashes, auth, album create/rename,
 upload/assignment, incremental work, failure/retry, real duplicate reconciliation,

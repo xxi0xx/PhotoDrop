@@ -22,7 +22,7 @@ func ftyp(major string, compatible ...string) []byte {
 func TestMediaIdentification(t *testing.T) {
 	for kind, data := range testutil.Images() {
 		t.Run(kind, func(t *testing.T) {
-			got, err := Sniff(data)
+			got, err := Sniff(data, int64(len(data)))
 			if err != nil || got != kind {
 				t.Fatalf("%q %v", got, err)
 			}
@@ -30,7 +30,7 @@ func TestMediaIdentification(t *testing.T) {
 	}
 	for kind, data := range testutil.Videos() {
 		t.Run(kind, func(t *testing.T) {
-			got, err := Sniff(data)
+			got, err := Sniff(data, int64(len(data)))
 			if err != nil || got != kind {
 				t.Fatalf("%q %v", got, err)
 			}
@@ -43,7 +43,8 @@ func TestMediaIdentification(t *testing.T) {
 			if brand == "qt  " {
 				want = "video/quicktime"
 			}
-			got, err := Sniff(append(ftyp(brand, "isom"), box...))
+			data := append(ftyp(brand, "isom"), box...)
+			got, err := Sniff(data, int64(len(data)))
 			if err != nil || got != want {
 				t.Fatalf("%q %v", got, err)
 			}
@@ -77,13 +78,13 @@ func TestMediaIdentification(t *testing.T) {
 		{"valid extended box", append(ftyp("mp42"), []byte("\x00\x00\x00\x01mdat\x00\x00\x00\x00\x00\x00\x00\x14data")...), "video/mp4"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Sniff(tc.data)
+			got, err := Sniff(tc.data, int64(len(tc.data)))
 			if got != tc.want || (tc.want == "" && !errors.Is(err, ErrType)) || (tc.want != "" && err != nil) {
 				t.Fatalf("%q %v", got, err)
 			}
 		})
 	}
-	if _, err := Sniff(nil); !errors.Is(err, ErrEmpty) {
+	if _, err := Sniff(nil, 0); !errors.Is(err, ErrEmpty) {
 		t.Fatal(err)
 	}
 	for _, kind := range []string{"video/mp4", "video/quicktime", "application/octet-stream", ""} {

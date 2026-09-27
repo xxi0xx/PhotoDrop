@@ -21,6 +21,13 @@ merely by listing `isom`. Video must also have a following box header; visibly
 invalid/truncated box headers fail. Oversized, extended-size or incomplete
 `ftyp` boxes outside this bounded profile are rejected.
 
+The following box's declared length is also checked against the known total
+object size. Direct S3 uses verified HEAD size; local uploads recheck the same
+prefix against the final streamed byte count before becoming ready. Thus a
+malformed object ending at exactly byte 512 is rejected, while a valid larger
+object with that same prefix can continue beyond the sniff window. Classification
+still inspects at most 512 bytes and does not parse the rest of the container.
+
 Brand references: [MP4 Registration Authority](https://mp4ra.org/registered-types/brands)
 and [Apple's file type compatibility atom](https://developer.apple.com/documentation/quicktime-file-format/file_type_compatibility_atom).
 This is bounded signature validation, not a full container/codec integrity check
@@ -29,7 +36,8 @@ by the consuming application. PhotoDrop does not decode, transcode, extract
 metadata, generate thumbnails, or offer playback. Immich processes imported media.
 
 `PHOTODROP_MAX_FILE_SIZE` applies equally to images and videos. Event and session
-asset/byte quotas count both. There are no new settings or migrations. Existing
+asset/byte quotas count both. Video support itself adds no settings or migrations;
+the separate opt-in Immich policy uses migration 010. Existing
 v1.0 data and historical backend records work unchanged. Local transfers pass
 through PhotoDrop and any reverse proxy's body/time limits; direct S3 sends media
 bytes directly to object storage. Finalization keeps exact-size, MIME metadata,

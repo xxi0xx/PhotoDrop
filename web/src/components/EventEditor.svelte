@@ -12,6 +12,7 @@
   let targets = $state<ImmichTargets>({active_target:'',targets:[]});
   let targetError = $state(''); let setupImmich = $state(false); let immichTarget = $state(''); let albumDraft = $state<string | null>(null);
   const newAlbumName = $derived(suggestedAlbum(name, albumDraft));
+  let autoImport = $state(false);
   async function loadTargets() {
     targetError = '';
     try { targets = await request<ImmichTargets>('/api/admin/immich/targets'); immichTarget = initialTarget(targets); }
@@ -34,7 +35,7 @@
       // Keep exact persisted bytes when the rounded display has not been edited.
       const maxBytes = maxStorageGiB === loadedStorageGiB && event ? event.max_bytes : maxStorageGiB == null ? null : Math.round(maxStorageGiB * 1073741824);
       const data = { name, description, event_date: eventDate || null, enabled, expires_at: expiration ? new Date(expiration).toISOString() : null, max_assets: maxPhotos ?? null, max_bytes: maxBytes,
-        ...(!id && setupImmich ? {immich:{target:immichTarget,album_name:newAlbumName}} : {}) };
+        ...(!id && setupImmich ? {immich:{target:immichTarget,album_name:newAlbumName,auto_import:autoImport}} : {}) };
       const result = await request<{ event: EventRecord }>(id ? `/api/admin/events/${id}` : '/api/admin/events', id ? 'PUT' : 'POST', data);
       if (!id) { window.location.assign(`/admin/events/${result.event.id}`); return; }
       apply(result.event); notice = 'Event saved.';
@@ -86,7 +87,8 @@
             <div class="field"><label for="new-immich-target">Target</label><select id="new-immich-target" bind:value={immichTarget}>{#each targets.targets as target}<option value={target.key}>{target.key}{target.available ? '' : ' (credentials unavailable)'}</option>{/each}</select></div>
             <div class="field"><label for="new-immich-album">Album name</label><input id="new-immich-album" maxlength="200" value={newAlbumName} oninput={event => albumDraft = event.currentTarget.value} /></div>
             {#if !targets.targets.find(target => target.key === immichTarget)?.available}<p class="notice">This target's credentials are unavailable. Your event will be created; album setup will need a retry after the operator restores credentials.</p>{/if}
-            <p class="hint">Album setup runs in the background. Guest uploads work even if Immich is unavailable. Media is sent only when you choose Send to Immich.</p>
+            <label class="checkbox" for="new-auto-import"><input id="new-auto-import" type="checkbox" bind:checked={autoImport} />Automatically send new uploads to Immich</label>
+            <p class="hint">Album setup runs in the background. Guest uploads work even if Immich is unavailable. Automatic import is optional; otherwise use Send to Immich. Copies remain independent, with no two-way sync. Failed imports need a manual retry.</p>
           {/if}
         </fieldset>{/if}
       </section>

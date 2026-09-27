@@ -255,7 +255,7 @@ func (s *Service) Complete(ctx context.Context, publicID, sessionID, id string) 
 	if err != nil {
 		return Asset{}, err
 	}
-	kind, err := Sniff(prefix)
+	kind, err := Sniff(prefix, info.Size)
 	if err != nil {
 		return reject(err)
 	}

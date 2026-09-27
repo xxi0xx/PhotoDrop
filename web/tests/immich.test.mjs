@@ -1,7 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { importView, initialTarget, suggestedAlbum } from '../src/lib/immich.ts';
+import { importView, initialTarget, suggestedAlbum, automaticImportHint } from '../src/lib/immich.ts';
 const base = { target: { key: 'home', available: true }, total: 10, imported: 6, duplicate: 1, failed: 1, pending: 0, new: 2 };
+test('automatic policy keeps explicit Send/Retry controls and explains independent pending work', () => {
+  for(const auto_import of [false,true]) {
+    const view=importView({...base,auto_import},false);
+    assert.equal(view.canSend,true);assert.equal(view.canRetry,true);
+  }
+  assert.match(automaticImportHint(true),/once the album is ready/);
+  assert.match(automaticImportHint(true),/manual retry/);
+  assert.match(automaticImportHint(false),/off/);
+  assert.match(automaticImportHint(false),/queued work may finish/);
+});
 test('new-event defaults and album name follow only before manual editing', () => {
   const targets = [{ key: 'offline', available: false }, { key: 'home', available: true }];
   assert.equal(initialTarget({ active_target: '', targets: [] }), '');

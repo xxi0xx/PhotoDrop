@@ -72,7 +72,7 @@ func TestEventProvisioningAPI(t *testing.T) {
 	if strings.Contains(catalog.Body.String(), remote.URL) || strings.Contains(catalog.Body.String(), "private-key") || strings.Contains(catalog.Body.String(), "offline.invalid") {
 		t.Fatal("unsafe discovery", catalog.Body.String())
 	}
-	for _, setup := range []string{"", `,"immich":{"target":"home","album_name":"Early album"}`, `,"immich":{"target":"offline","album_name":"Unavailable"}`} {
+	for _, setup := range []string{"", `,"immich":{"target":"home","album_name":"Early album","auto_import":true}`, `,"immich":{"target":"offline","album_name":"Unavailable"}`} {
 		started := time.Now()
 		w := call("POST", "/api/admin/events", `{"name":"Event","enabled":true`+setup+`}`)
 		if w.Code != 201 || time.Since(started) > time.Second || calls.Load() != 0 {
@@ -97,11 +97,31 @@ func TestEventProvisioningAPI(t *testing.T) {
 	if jobs != 2 || bindings != 2 {
 		t.Fatal("event setup not queued", jobs, bindings)
 	}
+	var automatic bool
+	if err := db.QueryRow("SELECT auto_import FROM immich_event_imports WHERE event_id=2").Scan(&automatic); err != nil || !automatic {
+		t.Fatal("creation lost auto setting", err)
+	}
+	for _, enabled := range []string{"false", "true"} {
+		if w := call("PUT", "/api/admin/events/2/immich/auto-import", `{"target":"home","auto_import":`+enabled+`}`); w.Code != 204 {
+			t.Fatal(w.Body.String())
+		}
+		var changed immich.Status
+		w := call("GET", "/api/admin/events/2/immich", "")
+		if err := json.Unmarshal(w.Body.Bytes(), &changed); err != nil || changed.AutoImport != (enabled == "true") {
+			t.Fatal(w.Body.String(), err)
+		}
+	}
+	if w := call("PUT", "/api/admin/events/1/immich/auto-import", `{"target":"home","auto_import":true}`); w.Code != 404 {
+		t.Fatal("enabled absent binding", w.Code)
+	}
+	if w := call("PUT", "/api/admin/events/2/immich/auto-import", `{"target":"home"}`); w.Code != 422 {
+		t.Fatal("absent policy accepted", w.Code)
+	}
 	// The selected non-default binding must be shown after the creation redirect.
 	w := call("GET", "/api/admin/events/3/immich", "")
 	var status immich.Status
 	json.Unmarshal(w.Body.Bytes(), &status)
-	if status.Target == nil || status.Target.Key != "offline" || status.Target.Available || status.Job.Status != "queued" {
+	if status.Target == nil || status.Target.Key != "offline" || status.Target.Available || status.AutoImport || status.Job.Status != "queued" {
 		t.Fatal(w.Body.String())
 	}
 	if w := call("POST", "/api/admin/events/1/immich/album", `{"target":"home","album_name":"Existing empty event"}`); w.Code != 202 {

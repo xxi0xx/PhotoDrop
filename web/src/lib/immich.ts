@@ -8,9 +8,13 @@ export function suggestedAlbum(eventName: string, edited: string | null): string
 export type ImmichStatus = {
   active_target: string; targets: ImmichTarget[]; target?: ImmichTarget;
   album_name: string; album_id?: string; album_state?: string; album_url?: string;
+  auto_import?: boolean;
   total: number; imported: number; duplicate: number; failed: number; pending: number; new: number;
   job?: { id: number; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'; error: string; cancel_requested: boolean };
 };
+export function automaticImportHint(enabled: boolean): string {
+  return enabled ? 'New and previously unselected uploads are sent in background batches once the album is ready. Failed imports need a manual retry.' : 'Automatic import is off. Use Send to Immich to select media. Already queued work may finish.';
+}
 export function importView(status: ImmichStatus, busy: boolean, deleting = false) {
   const active = status.job?.status === 'queued' || status.job?.status === 'running';
   const disabled = busy || deleting || active || !status.target?.available;

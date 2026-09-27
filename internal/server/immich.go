@@ -37,6 +37,25 @@ func (a *application) immichTargets(w http.ResponseWriter, r *http.Request, _ au
 	writeJSON(w, 200, a.immich.TargetCatalog())
 }
 
+func (a *application) immichAutoImport(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	var input struct {
+		Target     string `json:"target"`
+		AutoImport *bool  `json:"auto_import"`
+	}
+	if !decodeJSON(w, r, &input, 1024) {
+		return
+	}
+	if input.AutoImport == nil {
+		a.immichFailure(w, immich.ErrInput)
+		return
+	}
+	if err := a.immich.SetAutoImport(r.Context(), internalID(r), input.Target, *input.AutoImport); err != nil {
+		a.immichFailure(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (a *application) immichProvision(w http.ResponseWriter, r *http.Request, _ auth.Session) {
 	var input struct {
 		Target    string `json:"target"`

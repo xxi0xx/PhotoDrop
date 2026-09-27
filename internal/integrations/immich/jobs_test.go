@@ -282,9 +282,13 @@ func TestAssignmentFailureAndLostUploadResponse(t *testing.T) {
 	}
 }
 
-func waitStatus(t *testing.T, s *Service, e events.Event, predicate func(Status) bool) Status {
+func waitStatus(t *testing.T, s *Service, e events.Event, predicate func(Status) bool, timeout ...time.Duration) Status {
 	t.Helper()
-	deadline := time.NewTimer(5 * time.Second)
+	budget := 5 * time.Second
+	if len(timeout) > 0 {
+		budget = timeout[0]
+	}
+	deadline := time.NewTimer(budget)
 	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()

@@ -90,11 +90,11 @@ await restart('local-default'); await login(); await control({});
 const catalog = (await json('GET', '/api/admin/immich/targets')).body;
 assert.equal(catalog.active_target, 'integration-test');
 assert.ok(!JSON.stringify(catalog).includes('localhost:2284'), 'internal API origin leaked');
-async function provisionedEvent(label) {
+async function provisionedEvent(label, autoImport = false) {
   const start = Date.now();
   const event = (await json('POST', '/api/admin/events', {
     name: `${label} ${randomUUID()}`, enabled: true,
-    immich: {target: 'integration-test', album_name: label},
+    immich: {target: 'integration-test', album_name: label, auto_import: autoImport},
   }, 201)).body.event;
   assert.ok(Date.now() - start < 2000, 'creation waited on Immich');
   return event;
@@ -133,7 +133,7 @@ assert.equal((await waitFor(lostAlbum,s=>s.job.status==='failed')).album_state,'
 await retryAlbum(lostAlbum);
 assert.equal((await control()).album_creates-beforeLostAlbum.album_creates,1);
 const beforeRestartAlbum = await control();
-await control({album_delay_ms:10000});
+await control({hold_albums:true});
 const restartAlbum = await provisionedEvent('Interrupted album creation');
 const deadlineAlbum=Date.now()+30000;
 while ((await control()).album_creates===beforeRestartAlbum.album_creates) {
@@ -145,6 +145,88 @@ await control({}); await restart();
 assert.equal((await waitFor(restartAlbum,s=>s.job.status==='completed')).total,0);
 assert.equal((await control()).album_creates-beforeRestartAlbum.album_creates,1);
 console.log('Early/empty provisioning, outage isolation, manual retry/import, rename, lost album response and restart without duplicate albums passed.');
+
+// Durable automatic import. Gates and observed job states synchronize races;
+// upload notifications are deliberately unnecessary for periodic discovery.
+async function automatic(event, enabled) {
+  await json('PUT',pathFor(event)+'/auto-import',{target:'integration-test',auto_import:enabled},204);
+}
+async function waitControl(predicate) {
+  const deadline=Date.now()+30000;
+  for (;;) {const value=await control();if(predicate(value))return value;assert.ok(Date.now()<deadline,'test gate was not reached');await new Promise(resolve=>setTimeout(resolve,100));}
+}
+await restart('s3-a');
+const beforeAutomatic=await control();
+await control({hold_albums:true});
+const automaticEvent=await provisionedEvent('Automatic mixed media',true);
+await waitControl(value=>value.album_creates===beforeAutomatic.album_creates+1);
+const autoSources=[
+  await upload(automaticEvent,photo(),'auto.png'),
+  await upload(automaticEvent,video('mp4',true),'auto.mp4','video/mp4'),
+  await upload(automaticEvent,video('mov',true),'auto.mov','video/quicktime'),
+];
+const provisioning=await status(automaticEvent);
+assert.equal(provisioning.auto_import,true);assert.equal(provisioning.pending,0);assert.equal(provisioning.new,3);
+assert.equal((await control()).uploads,beforeAutomatic.uploads,'provisioning sent media');
+await control({hold_uploads:true});
+let autoState=await waitFor(automaticEvent,s=>s.job.status==='running'&&s.pending===3);
+const autoAlbum=autoState.album_id, firstAutoJob=autoState.job.id;
+assert.equal(firstAutoJob,provisioning.job.id+1);
+await waitControl(value=>value.uploads>beforeAutomatic.uploads);
+for(let i=0;i<10;i++)await upload(automaticEvent,photo(),`burst-${i}.png`);
+autoState=await status(automaticEvent);
+assert.equal(autoState.job.id,firstAutoJob);assert.equal(autoState.pending,3);assert.equal(autoState.new,10);
+await automatic(automaticEvent,false);await control({});
+autoState=await waitFor(automaticEvent,s=>s.job.status==='completed');
+assert.equal(autoState.imported,3);assert.equal(autoState.new,10);assert.equal(autoState.auto_import,false);
+await control({hold_uploads:true});await automatic(automaticEvent,true);
+autoState=await waitFor(automaticEvent,s=>s.job.status==='running'&&s.pending===10);
+assert.equal(autoState.job.id,firstAutoJob+1);
+await upload(automaticEvent);await upload(automaticEvent);
+const held=await status(automaticEvent);assert.equal(held.new,2);assert.equal(held.job.id,autoState.job.id);
+await control({});
+autoState=await waitFor(automaticEvent,s=>s.imported===15&&s.job.status==='completed');
+assert.equal(autoState.job.id,firstAutoJob+2,'burst created more than one follow-up job');
+assert.equal((await remote('GET',`/albums/${autoAlbum}`)).assetCount,15);
+const autoRemote=(await remote('POST','/search/metadata',{albumIds:[autoAlbum]},200,true)).assets.items;
+assert.equal(autoRemote.filter(a=>a.type==='VIDEO').length,2);
+for(const source of autoSources) {
+ const match=autoRemote.find(a=>a.originalFileName===source.filename);assert.ok(match);
+ const result=await fetch(immich+`/assets/${match.id}/original`,{headers:{Authorization:`Bearer ${accessToken}`}});
+ assert.equal(result.status,200);assert.equal(sha(Buffer.from(await result.arrayBuffer())),sha(source.bytes));
+}
+console.log('Real automatic S3 PNG/MP4/MOV import, hashes, provisioning isolation, disable/enable backlog and 10+2 burst coalescing passed.');
+
+await restart('local-default');await control({hold_uploads:true});
+await upload(automaticEvent);
+autoState=await waitFor(automaticEvent,s=>s.job.status==='running'&&s.pending===1);
+await upload(automaticEvent);await upload(automaticEvent);
+assert.equal((await status(automaticEvent)).new,2);
+const interruptedAutoJob=autoState.job.id;
+compose(['kill','-s','SIGKILL','photodrop']);await control({});await restart();
+autoState=await waitFor(automaticEvent,s=>s.imported===18&&s.job.status==='completed');
+assert.equal(autoState.job.id,interruptedAutoJob+1,'restart stranded or split the untracked backlog');
+
+await automatic(automaticEvent,false);
+await upload(automaticEvent);await upload(automaticEvent);
+await control({fail_next:true});await automatic(automaticEvent,true);
+autoState=await waitFor(automaticEvent,s=>s.job.status==='failed');
+assert.equal(autoState.failed,1);assert.equal(autoState.imported,19);
+const failureJob=autoState.job.id;
+await upload(automaticEvent);
+autoState=await waitFor(automaticEvent,s=>s.job.status==='completed'&&s.imported===20);
+assert.equal(autoState.job.id,failureJob+1);assert.equal(autoState.failed,1,'new work silently retried a failure');
+autoState=await send(automaticEvent,'retry');assert.equal(autoState.imported,21);assert.equal(autoState.failed,0);
+await control({fail_validate:true});
+const guestStarted=Date.now();await upload(automaticEvent);
+assert.ok(Date.now()-guestStarted<2000,'guest completion waited for Immich');await json('GET','/healthz');
+autoState=await waitFor(automaticEvent,s=>s.job.status==='failed');
+assert.equal(autoState.failed,1);assert.equal(autoState.pending,0);
+await control({});autoState=await send(automaticEvent,'retry');assert.equal(autoState.imported,22);
+await json('DELETE',`/api/admin/events/${automaticEvent.id}`,undefined,204);
+assert.equal((await remote('GET',`/albums/${autoAlbum}`)).assetCount,22);
+console.log('Real automatic local uploads, restart reconciliation, partial failure with manual-only retry, outage isolation and independent deletion passed.');
+
 const event = await createEvent('Gate 6 lifecycle');
 const local = await upload(event);
 await restart('s3-a'); const a = await upload(event, video('mp4', true), 'clip.mp4', 'video/mp4');

@@ -83,6 +83,12 @@ may change without changing target identity, and is never used for API requests.
 Without it, the admin shows no browser album link.
 See [Immich](export-immich.md) for API permissions.
 
+Automatic import is not an environment variable. Its `auto_import` setting is
+stored per event/target binding, defaults off, and is changed through the admin UI
+or protected API without restarting. It does not change immutable target identity.
+It selects ready, never-selected media in background batches; failed imports still
+require manual retry, and guest completion is independent of Immich availability.
+
 Export reads DATA_DIR and storage configuration only; there are no additional
 export environment variables. Version is build-time metadata. `PHOTODROP_IMAGE`
 is **Compose-only**: default `photodrop:local`, or a released GHCR tag/digest.
