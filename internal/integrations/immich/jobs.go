@@ -20,12 +20,14 @@ var ErrInput = errors.New("choose a configured target, new or retry mode, and an
 var ErrActive = errors.New("an import job is already queued or running for this event and target")
 
 type Service struct {
-	db      *sql.DB
-	media   *media.Service
-	targets *Targets
-	logger  *slog.Logger
-	runMu   sync.Mutex
-	wake    chan struct{}
+	db             *sql.DB
+	media          *media.Service
+	targets        *Targets
+	logger         *slog.Logger
+	runMu          sync.Mutex
+	reconcileMu    sync.Mutex
+	reconcileAfter int64
+	wake           chan struct{}
 }
 
 func New(db *sql.DB, source *media.Service, targets *Targets, logger *slog.Logger) *Service {
@@ -46,6 +48,7 @@ type Status struct {
 	AlbumName    string   `json:"album_name"`
 	AlbumID      string   `json:"album_id,omitempty"`
 	AlbumState   string   `json:"album_state"`
+	AutoImport   bool     `json:"auto_import"`
 	AlbumURL     string   `json:"album_url,omitempty"`
 	Total        int64    `json:"total"`
 	Imported     int64    `json:"imported"`
@@ -80,7 +83,7 @@ func (s *Service) Status(ctx context.Context, eventID int64, key string) (Status
 	}
 	result.Target = &t
 	var importID int64
-	err = s.db.QueryRowContext(ctx, "SELECT id,album_name,COALESCE(immich_album_id,''),album_state FROM immich_event_imports WHERE event_id=? AND target_id=?", eventID, t.ID).Scan(&importID, &result.AlbumName, &result.AlbumID, &result.AlbumState)
+	err = s.db.QueryRowContext(ctx, "SELECT id,album_name,COALESCE(immich_album_id,''),album_state,auto_import FROM immich_event_imports WHERE event_id=? AND target_id=?", eventID, t.ID).Scan(&importID, &result.AlbumName, &result.AlbumID, &result.AlbumState, &result.AutoImport)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return result, err
 	}
@@ -128,7 +131,7 @@ func (s *Service) Provision(ctx context.Context, eventID int64, key, name string
 	return s.enqueue(ctx, eventID, key, name, "new", true)
 }
 
-func (s *Service) CreateEvent(ctx context.Context, input events.Input, key, name string) (events.Event, error) {
+func (s *Service) CreateEvent(ctx context.Context, input events.Input, key, name string, autoImport bool) (events.Event, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return events.Event{}, err
@@ -142,6 +145,9 @@ func (s *Service) CreateEvent(ctx context.Context, input events.Input, key, name
 	// the worker records the failure while the event remains usable.
 	_, err = s.enqueueTx(ctx, tx, event.ID, key, name, "new", true, false)
 	if err != nil {
+		return events.Event{}, err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE immich_event_imports SET auto_import=? WHERE event_id=?", autoImport, event.ID); err != nil {
 		return events.Event{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -284,6 +290,7 @@ func (s *Service) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	recovered := false
+	var nextReconcile time.Time
 	for ctx.Err() == nil {
 		if !recovered {
 			if err := s.recover(ctx); err != nil {
@@ -297,9 +304,16 @@ func (s *Service) Run(ctx context.Context) {
 			}
 			recovered = true
 		}
+		if !time.Now().Before(nextReconcile) {
+			if err := s.reconcile(ctx); err != nil && ctx.Err() == nil {
+				s.logger.Warn("Immich automatic reconciliation deferred")
+			}
+			nextReconcile = time.Now().Add(reconcileInterval)
+		}
 		job, err := s.claim(ctx)
 		if err == nil {
 			s.execute(ctx, job)
+			nextReconcile = time.Time{}
 			continue
 		}
 		if !errors.Is(err, sql.ErrNoRows) && ctx.Err() == nil {
@@ -309,6 +323,7 @@ func (s *Service) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-s.wake:
+			nextReconcile = time.Time{}
 		case <-ticker.C:
 		}
 	}
@@ -394,15 +409,30 @@ func (s *Service) execute(parent context.Context, j Job) {
 	if err != nil {
 		status, message = "failed", safeError(err)
 	}
+	tx, txErr := s.db.BeginTx(finish, nil)
+	if txErr != nil {
+		return
+	}
+	defer tx.Rollback()
 	var requested bool
-	if err := s.db.QueryRowContext(finish, "SELECT cancel_requested FROM integration_jobs WHERE id=?", j.ID).Scan(&requested); err != nil {
+	if err := tx.QueryRowContext(finish, "SELECT cancel_requested FROM integration_jobs WHERE id=?", j.ID).Scan(&requested); err != nil {
 		return
 	}
 	if requested {
 		status, message = "cancelled", "Unfinished media can be sent again"
 	}
-	if _, err := s.db.ExecContext(finish, "UPDATE integration_jobs SET status=?,finished_at=?,last_error=? WHERE id=?", status, now(), message, j.ID); err != nil {
+	if status == "failed" {
+		// Validate/album failures can occur before any asset attempt. Those
+		// selected rows must not be retried by a later automatic job.
+		if _, err := tx.ExecContext(finish, "UPDATE immich_asset_imports SET status='failed',last_error=?,updated_at=? WHERE event_import_id=? AND status='pending'", message, now(), j.importID); err != nil {
+			return
+		}
+	}
+	if _, err := tx.ExecContext(finish, "UPDATE integration_jobs SET status=?,finished_at=?,last_error=? WHERE id=?", status, now(), message, j.ID); err != nil {
 		s.logger.Error("Immich job progress could not be saved", "job_id", j.ID)
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		return
 	}
 	s.logger.Info("Immich job finished", "job_id", j.ID, "status", status)

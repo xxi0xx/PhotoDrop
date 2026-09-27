@@ -7,10 +7,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { photo } from './photo-fixture.mjs';
 
-const baseline = '6b7d046'; // Merged Gate 7, not a mutable tag or remote branch.
+const baseline = process.argv.includes('--gate7') ? '6b7d046' : '73b7eee9c7c252dedf8a441a38971c144403c247'; // Immutable Phase 2 (or older Gate 7) baseline.
 const id = `photodrop-release-${randomBytes(5).toString('hex')}`;
 const dir = mkdtempSync(join(tmpdir(), id));
-const oldImage = `${id}:gate7`, image = `${id}:candidate`, toolsImage = `${id}:tools`;
+const oldImage = `${id}:baseline`, image = `${id}:candidate`, toolsImage = `${id}:tools`;
 const objects = `${id}-objects`, app = `${id}-app`;
 const volumes = ['data', 'backup', 'restored'].map(x => `${id}-${x}`);
 const [data, backup, restored] = volumes;
@@ -70,10 +70,12 @@ async function prepare(event, sid, bytes) {
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 
 try {
-  execFileSync('git', ['diff', '--exit-code', baseline, '--', 'migrations']);
+  const oldMigrations = execFileSync('git', ['ls-tree','-r','--name-only',baseline,'--','migrations'],{encoding:'utf8'}).trim().split('\n').filter(path=>path.endsWith('.sql'));
+  assert.equal(oldMigrations.length,9);
+  execFileSync('git', ['diff', '--exit-code', baseline, '--', ...oldMigrations]);
   const archive = join(dir, 'baseline.tar');
   execFileSync('git', ['archive', '--format=tar', '-o', archive, baseline]);
-  console.log('Building exact Gate 7 baseline and release candidate (no publishing).');
+  console.log(`Building exact baseline ${baseline} and release candidate (no publishing).`);
   docker(['build', '-t', oldImage, '-'], { input: readFileSync(archive), stdio: ['pipe', 'inherit', 'inherit'] });
   const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   docker(['build', '--build-arg', 'VERSION=1.0.0-rc.test', '--build-arg', `REVISION=${revision}`, '-t', image, '.'], { stdio: 'inherit' });
@@ -122,7 +124,18 @@ try {
       const expected = entry.photoDropAssetId === local.id ? localBytes : remoteBytes;
       assert.equal(docker(['exec', app, 'sha256sum', `/data/export-${label}/photos/${entry.exportFilename}`]).split(' ')[0], sha(expected));
     }
-    stop(); assert.deepEqual(state('snapshot', volume), before);
+    stop();
+    const after=state('snapshot',volume);
+    assert.equal(after.schema_migrations.length,10);
+    assert.deepEqual(after.schema_migrations.slice(0,9),before.schema_migrations);
+    const migration10=after.schema_migrations[9];
+    assert.equal(migration10.version,10);
+    assert.equal(migration10.name,'010_immich_auto_import.sql');
+    assert.equal(migration10.checksum,sha(readFileSync('migrations/010_immich_auto_import.sql','utf8').replaceAll('\r\n','\n')));
+    const expected=structuredClone(before);
+    expected.schema_migrations=after.schema_migrations;
+    for(const binding of expected.immich_event_imports) binding.auto_import=0;
+    assert.deepEqual(after,expected,'upgrade changed data beyond the opt-in policy migration');
     console.log(`${label}: health, old/new login, event/public URL, local/S3 hashes, names, quotas, backend identity, pending/ready, migrations and Immich metadata passed.`);
   }
   console.log('Stopped backup and destructive disposable restore passed; S3 objects remained external and unchanged.');

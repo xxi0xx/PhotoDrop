@@ -227,7 +227,7 @@ func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, dec
 	if int64(n) > expected {
 		return Asset{}, ErrSize
 	}
-	kind, err := Sniff(prefix[:n])
+	kind, err := Sniff(prefix[:n], -1)
 	if err != nil {
 		return Asset{}, err
 	}
@@ -237,6 +237,12 @@ func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, dec
 	}
 	if object.Size <= 0 || object.Size > limit || (claimedSize >= 0 && object.Size != claimedSize) {
 		return Asset{}, ErrSize
+	}
+	// Storage counted the complete stream. Recheck the same bounded prefix with
+	// its actual EOF, including an exact 512-byte object. Failure takes the normal
+	// cleanup path and never exposes a ready asset or releases quota prematurely.
+	if _, err := Sniff(prefix[:n], object.Size); err != nil {
+		return Asset{}, err
 	}
 	finish, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

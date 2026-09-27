@@ -14,7 +14,7 @@ func TestCreateEventProvisioningIsAtomicAndOffline(t *testing.T) {
 	on := true
 	input := events.Input{Name: "New event", Enabled: &on}
 	f.validateErr = ErrUnavailable
-	e, err := s.CreateEvent(t.Context(), input, "test", "Before uploads")
+	e, err := s.CreateEvent(t.Context(), input, "test", "Before uploads", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestCreateEventProvisioningIsAtomicAndOffline(t *testing.T) {
 	if _, err := s.db.Exec("CREATE TRIGGER fail_queue BEFORE INSERT ON integration_jobs BEGIN SELECT RAISE(ABORT,'queue failed'); END"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateEvent(t.Context(), input, "test", ""); err == nil {
+	if _, err := s.CreateEvent(t.Context(), input, "test", "", false); err == nil {
 		t.Fatal("queue failure accepted")
 	}
 	var after, bindings int
@@ -134,7 +134,7 @@ func TestUnavailableTargetStillCreatesUsableEvent(t *testing.T) {
 	s, _, _, _ := jobsFixture(t, 0)
 	s.targets.entries[1] = Target{ID: 1, Key: "test"}
 	on := true
-	e, err := s.CreateEvent(t.Context(), events.Input{Name: "Credentials missing", Enabled: &on}, "test", "")
+	e, err := s.CreateEvent(t.Context(), events.Input{Name: "Credentials missing", Enabled: &on}, "test", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}

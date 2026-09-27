@@ -3,19 +3,33 @@
 package main
 
 import (
-	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 
-	"photodrop/internal/database"
+	_ "modernc.org/sqlite"
 )
 
 func main() {
 	if len(os.Args) != 3 || (os.Args[1] != "seed" && os.Args[1] != "snapshot") {
 		panic("usage: releasestate seed|snapshot DISPOSABLE_DATA_DIR")
 	}
-	db, err := database.Open(context.Background(), os.Args[2])
+	// Inspect/seed the baseline as-is. Using database.Open here would apply the
+	// candidate's migrations before its upgrade test or pre-upgrade backup.
+	path, err := filepath.Abs(filepath.Join(os.Args[2], "photodrop.db"))
+	if err != nil {
+		panic(err)
+	}
+	path = filepath.ToSlash(path)
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	dsn := (&url.URL{Scheme: "file", Path: path, RawQuery: url.Values{"mode": {"rw"}, "_pragma": {"foreign_keys(1)"}}.Encode()}).String()
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		panic(err)
 	}

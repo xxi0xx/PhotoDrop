@@ -16,7 +16,13 @@ docker compose exec --user 10001 photodrop photodrop version
 
 Use the same overlays throughout. Check logs privately, sign in, verify an existing
 event/public link/counts, then test upload/export. Startup validates checksums and
-applies new migrations transactionally. Gate 8 adds no migration; 001–009 are unchanged.
+applies new migrations transactionally. Unreleased v1.1 Phase 3 adds migration 010:
+`immich_event_imports.auto_import INTEGER NOT NULL DEFAULT 0 CHECK (auto_import IN (0,1))`
+and a partial index on enabled, ready bindings. Migrations 001–009 are unchanged.
+Existing bindings remain manual-only; event/public IDs, album IDs/markers, target
+identity and import history are preserved. Enable automatic import explicitly
+after checking a binding. Back up before this schema upgrade; use the pre-upgrade
+backup and old image for rollback, not an older binary against the upgraded data.
 
 Migrations move forward. Never edit, rename, remove or renumber a released migration.
 Downgrading may fail or be unsafe. Supported rollback: stop the new app, restore a

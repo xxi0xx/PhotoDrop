@@ -47,14 +47,22 @@ func ValidateDeclaredType(value string) error {
 }
 
 // Sniff inspects at most 512 bytes, without decoding media or verifying codecs.
+// objectSize is the known complete byte length, or -1 while a local stream is
+// incomplete. Call again with its final counted size before marking it ready.
 // Parse ISO BMFF before http.DetectContentType: its MP4 heuristic does not
 // distinguish image brands or require the complete declared ftyp box.
-func Sniff(prefix []byte) (string, error) {
+func Sniff(prefix []byte, objectSize int64) (string, error) {
 	if len(prefix) == 0 {
 		return "", ErrEmpty
 	}
 	if len(prefix) > 512 {
 		prefix = prefix[:512]
+	}
+	if objectSize < 0 && len(prefix) < 512 {
+		objectSize = int64(len(prefix))
+	}
+	if objectSize >= 0 && objectSize < int64(len(prefix)) {
+		return "", ErrType
 	}
 	if len(prefix) >= 8 && string(prefix[4:8]) == "ftyp" {
 		size := int(binary.BigEndian.Uint32(prefix[:4]))
@@ -97,7 +105,7 @@ func Sniff(prefix []byte) (string, error) {
 					return "", ErrType
 				}
 			}
-			if next != 0 && (next < minimum || (len(prefix) < 512 && next > uint64(len(prefix)-size))) {
+			if next != 0 && (next < minimum || (objectSize >= 0 && next > uint64(objectSize-int64(size)))) {
 				return "", ErrType
 			}
 			for _, brand := range brands {

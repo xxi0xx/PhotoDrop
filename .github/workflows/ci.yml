@@ -78,7 +78,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
-      - name: Upgrade and restore populated Gate 7 data in disposable volumes
+      - name: Upgrade and restore populated Phase 2 data in disposable volumes
         run: node scripts/smoke-release.mjs
       - name: Fresh documented local and S3 installations
         run: node scripts/smoke-fresh.mjs

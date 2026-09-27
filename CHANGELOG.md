@@ -2,9 +2,15 @@
 
 ## [Unreleased]
 
+- Opt-in automatic Immich import per event/target, with durable bounded
+  reconciliation, coalesced jobs and restart recovery. Failed imports still need
+  manual retry. Migration 010 defaults existing bindings to manual-only.
+- Reject truncated MP4/MOV objects ending exactly at the 512-byte sniff boundary
+  without rejecting equivalent prefixes of larger valid objects.
+
 - Optional Immich album setup during event creation and before any media exists,
   with persistent background provisioning, retry/restart recovery, and separate
-  public browser URLs. Media imports remain manual.
+  public browser URLs. Manual Send/Retry remains available.
 
 - MP4 and QuickTime MOV uploads alongside images, through the existing local/S3,
   quota, export and Immich pipelines. Original bytes are preserved; no transcoding

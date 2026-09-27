@@ -64,12 +64,14 @@ func (a *application) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/admin/events/{id}/immich", a.protected(a.immichStatus))
 	mux.HandleFunc("GET /api/admin/immich/targets", a.protected(a.immichTargets))
 	mux.HandleFunc("POST /api/admin/events/{id}/immich/album", a.protected(a.immichProvision))
+	mux.HandleFunc("PUT /api/admin/events/{id}/immich/auto-import", a.protected(a.immichAutoImport))
 	mux.HandleFunc("POST /api/admin/events/{id}/immich/test", a.protected(a.immichTest))
 	mux.HandleFunc("POST /api/admin/events/{id}/immich/jobs", a.protected(a.immichStart))
 	mux.HandleFunc("POST /api/admin/events/{id}/immich/cancel", a.protected(a.immichCancel))
 	for path, methods := range map[string]string{
 		"/api/admin/immich/targets": "GET, HEAD", "/api/admin/events/{id}/immich/album": "POST",
-		"/api/admin/events/{id}/immich": "GET, HEAD", "/api/admin/events/{id}/immich/test": "POST", "/api/admin/events/{id}/immich/jobs": "POST", "/api/admin/events/{id}/immich/cancel": "POST",
+		"/api/admin/events/{id}/immich/auto-import": "PUT",
+		"/api/admin/events/{id}/immich":             "GET, HEAD", "/api/admin/events/{id}/immich/test": "POST", "/api/admin/events/{id}/immich/jobs": "POST", "/api/admin/events/{id}/immich/cancel": "POST",
 		"/api/admin/login": "POST", "/api/admin/logout": "POST", "/api/admin/session": "GET, HEAD",
 		"/api/admin/events": "GET, HEAD, POST", "/api/admin/events/{id}": "GET, HEAD, PUT, DELETE", "/api/public/events/{public_id}": "GET, HEAD",
 		"/api/public/events/{public_id}/upload-sessions":                                          "POST",
@@ -365,8 +367,9 @@ func (a *application) createEvent(w http.ResponseWriter, r *http.Request, _ auth
 	var input struct {
 		events.Input
 		Immich *struct {
-			Target    string `json:"target"`
-			AlbumName string `json:"album_name"`
+			Target     string `json:"target"`
+			AlbumName  string `json:"album_name"`
+			AutoImport bool   `json:"auto_import"`
 		} `json:"immich"`
 	}
 	if !decodeJSON(w, r, &input, 32768) {
@@ -377,7 +380,7 @@ func (a *application) createEvent(w http.ResponseWriter, r *http.Request, _ auth
 	if input.Immich == nil {
 		e, err = a.events.Create(r.Context(), input.Input)
 	} else {
-		e, err = a.immich.CreateEvent(r.Context(), input.Input, input.Immich.Target, input.Immich.AlbumName)
+		e, err = a.immich.CreateEvent(r.Context(), input.Input, input.Immich.Target, input.Immich.AlbumName, input.Immich.AutoImport)
 	}
 	if err != nil {
 		if errors.Is(err, immich.ErrInput) || errors.Is(err, immich.ErrCredentials) {

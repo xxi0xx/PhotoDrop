@@ -18,6 +18,8 @@ import (
 )
 
 type faultState struct {
+	HoldUploads  bool `json:"hold_uploads"`
+	HoldAlbums   bool `json:"hold_albums"`
 	FailValidate bool `json:"fail_validate"`
 	LoseAlbum    bool `json:"lose_album"`
 	AlbumDelayMS int  `json:"album_delay_ms"`
@@ -38,13 +40,22 @@ func main() {
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	var mu sync.Mutex
 	var state faultState
+	var uploadGate, albumGate chan struct{}
 	proxy.ModifyResponse = func(r *http.Response) error {
 		if r.Request.Method == "POST" && r.Request.URL.Path == "/api/albums" && r.StatusCode < 300 {
 			mu.Lock()
 			state.AlbumCreates++
 			lose, delay := state.LoseAlbum, state.AlbumDelayMS
+			gate := albumGate
 			state.LoseAlbum = false
 			mu.Unlock()
+			if gate != nil {
+				select {
+				case <-r.Request.Context().Done():
+					return r.Request.Context().Err()
+				case <-gate:
+				}
+			}
 			if delay > 0 {
 				select {
 				case <-r.Request.Context().Done():
@@ -96,6 +107,22 @@ func main() {
 					return
 				}
 				state.FailNext = input.FailNext
+				if input.HoldUploads && !state.HoldUploads {
+					uploadGate = make(chan struct{})
+				}
+				if !input.HoldUploads && state.HoldUploads {
+					close(uploadGate)
+					uploadGate = nil
+				}
+				if input.HoldAlbums && !state.HoldAlbums {
+					albumGate = make(chan struct{})
+				}
+				if !input.HoldAlbums && state.HoldAlbums {
+					close(albumGate)
+					albumGate = nil
+				}
+				state.HoldUploads = input.HoldUploads
+				state.HoldAlbums = input.HoldAlbums
 				state.LoseNext = input.LoseNext
 				state.DelayMS = input.DelayMS
 				state.FailValidate = input.FailValidate
@@ -116,8 +143,16 @@ func main() {
 			mu.Lock()
 			state.Uploads++
 			fail, delay := state.FailNext, state.DelayMS
+			gate := uploadGate
 			state.FailNext = false
 			mu.Unlock()
+			if gate != nil {
+				select {
+				case <-r.Context().Done():
+					return
+				case <-gate:
+				}
+			}
 			if fail {
 				http.Error(w, "test-only forced upload failure", 503)
 				return
