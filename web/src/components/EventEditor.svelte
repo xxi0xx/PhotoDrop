@@ -3,17 +3,26 @@
   import ShareEvent from './ShareEvent.svelte';
   import { onMount, tick } from 'svelte';
   import { request, message, publicURL, localDateTime, formatBytes, APIError, type EventRecord } from '../lib/api';
+  import { initialTarget, suggestedAlbum, type ImmichTargets } from '../lib/immich';
   let { id }: { id: string | null } = $props();
   let event = $state<EventRecord | null>(null);
   let name = $state(''); let description = $state(''); let eventDate = $state(''); let enabled = $state(true); let expiration = $state('');
   let maxPhotos = $state<number | undefined>(); let maxStorageGiB = $state<number | undefined>();
   let loadedStorageGiB: number | undefined;
+  let targets = $state<ImmichTargets>({active_target:'',targets:[]});
+  let targetError = $state(''); let setupImmich = $state(false); let immichTarget = $state(''); let albumDraft = $state<string | null>(null);
+  const newAlbumName = $derived(suggestedAlbum(name, albumDraft));
+  async function loadTargets() {
+    targetError = '';
+    try { targets = await request<ImmichTargets>('/api/admin/immich/targets'); immichTarget = initialTarget(targets); }
+    catch { targetError = 'Optional Immich setup could not be loaded. You can still create the event and set it up later.'; }
+  }
   let loading = $state(true); let loadError = $state(''); let busy = $state(false); let error = $state(''); let notice = $state('');
   let fields = $state<Record<string, string>>({}); let confirming = $state(false); let confirmButton = $state<HTMLButtonElement>(); let deleteButton = $state<HTMLButtonElement>();
   async function keepEvent() { confirming = false; await tick(); deleteButton?.focus(); }
   function apply(saved: EventRecord) { event = saved; name = saved.name; description = saved.description; eventDate = saved.event_date ?? ''; enabled = saved.enabled; expiration = localDateTime(saved.expires_at); maxPhotos = saved.max_assets ?? undefined; loadedStorageGiB = saved.max_bytes == null ? undefined : Number((saved.max_bytes / 1073741824).toFixed(9)); maxStorageGiB = loadedStorageGiB; }
   async function load() {
-    if (!id) { loading = false; return; }
+    if (!id) { await loadTargets(); loading = false; return; }
     loading = true; loadError = '';
     try { apply((await request<{ event: EventRecord }>(`/api/admin/events/${id}`)).event); }
     catch (cause) { loadError = message(cause); } finally { loading = false; }
@@ -24,7 +33,8 @@
     try {
       // Keep exact persisted bytes when the rounded display has not been edited.
       const maxBytes = maxStorageGiB === loadedStorageGiB && event ? event.max_bytes : maxStorageGiB == null ? null : Math.round(maxStorageGiB * 1073741824);
-      const data = { name, description, event_date: eventDate || null, enabled, expires_at: expiration ? new Date(expiration).toISOString() : null, max_assets: maxPhotos ?? null, max_bytes: maxBytes };
+      const data = { name, description, event_date: eventDate || null, enabled, expires_at: expiration ? new Date(expiration).toISOString() : null, max_assets: maxPhotos ?? null, max_bytes: maxBytes,
+        ...(!id && setupImmich ? {immich:{target:immichTarget,album_name:newAlbumName}} : {}) };
       const result = await request<{ event: EventRecord }>(id ? `/api/admin/events/${id}` : '/api/admin/events', id ? 'PUT' : 'POST', data);
       if (!id) { window.location.assign(`/admin/events/${result.event.id}`); return; }
       apply(result.event); notice = 'Event saved.';
@@ -67,6 +77,20 @@
       <div class="field"><label class="checkbox" for="enabled"><input id="enabled" name="enabled" type="checkbox" bind:checked={enabled} />Enabled</label><p class="hint">Guests can view this event while it is enabled and has not expired.</p>{#if fields.enabled}<p class="error">{fields.enabled}</p>{/if}</div>
       <div class="field"><label for="expiration">Expiration <span class="muted">(your local time)</span></label><input id="expiration" name="expires_at" type="datetime-local" step="1" bind:value={expiration} aria-invalid={!!fields.expires_at} aria-describedby={fields.expires_at ? 'expiry-error' : undefined} />{#if fields.expires_at}<p id="expiry-error" class="error">{fields.expires_at}</p>{/if}<p class="hint">Leave empty for no expiration. Expiration closes the guest page; it does not delete the event.</p></div>
     </fieldset></section>
+    {#if !id && (targets.targets.length || targetError)}
+      <section class="section-card" aria-labelledby="new-immich-heading"><h2 id="new-immich-heading">Immich</h2>
+        {#if targetError}<p class="hint" role="status">{targetError}</p><button type="button" class="secondary" onclick={loadTargets}>Retry loading targets</button>
+        {:else}<fieldset disabled={busy}>
+          <label class="checkbox" for="setup-immich"><input id="setup-immich" type="checkbox" bind:checked={setupImmich} />Create an Immich album for this event</label>
+          {#if setupImmich}
+            <div class="field"><label for="new-immich-target">Target</label><select id="new-immich-target" bind:value={immichTarget}>{#each targets.targets as target}<option value={target.key}>{target.key}{target.available ? '' : ' (credentials unavailable)'}</option>{/each}</select></div>
+            <div class="field"><label for="new-immich-album">Album name</label><input id="new-immich-album" maxlength="200" value={newAlbumName} oninput={event => albumDraft = event.currentTarget.value} /></div>
+            {#if !targets.targets.find(target => target.key === immichTarget)?.available}<p class="notice">This target's credentials are unavailable. Your event will be created; album setup will need a retry after the operator restores credentials.</p>{/if}
+            <p class="hint">Album setup runs in the background. Guest uploads work even if Immich is unavailable. Media is sent only when you choose Send to Immich.</p>
+          {/if}
+        </fieldset>{/if}
+      </section>
+    {/if}
     {#if event}<ShareEvent url={publicURL(event)} publicID={event.public_id} />{/if}
     <section class="section-card" aria-labelledby="uploads-heading"><h2 id="uploads-heading">Guest uploads</h2>
       {#if event}<dl class="stat-grid"><div><dt>Files</dt><dd>{event.media.photo_count}{#if event.max_assets !== null}<small> / {event.max_assets}</small>{/if}</dd></div><div><dt>Storage used</dt><dd>{formatBytes(event.media.storage_bytes)}{#if event.max_bytes !== null}<small> / {formatBytes(event.max_bytes)}</small>{/if}</dd></div></dl>

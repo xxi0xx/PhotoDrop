@@ -85,6 +85,66 @@ else {
 const key = await remote('POST', '/api-keys', { name: `PhotoDrop test ${randomUUID()}`, permissions: ['album.create', 'album.read', 'asset.upload', 'albumAsset.create'] }, 201, true);
 apiKey = key.secret; assert.ok(apiKey, 'test API key missing');
 await restart('local-default'); await login(); await control({});
+// Provisioning selects no assets and uses the same durable marker recovery as
+// manual imports. Fault injection is confined to the disposable proxy.
+const catalog = (await json('GET', '/api/admin/immich/targets')).body;
+assert.equal(catalog.active_target, 'integration-test');
+assert.ok(!JSON.stringify(catalog).includes('localhost:2284'), 'internal API origin leaked');
+async function provisionedEvent(label) {
+  const start = Date.now();
+  const event = (await json('POST', '/api/admin/events', {
+    name: `${label} ${randomUUID()}`, enabled: true,
+    immich: {target: 'integration-test', album_name: label},
+  }, 201)).body.event;
+  assert.ok(Date.now() - start < 2000, 'creation waited on Immich');
+  return event;
+}
+async function retryAlbum(event) {
+  await json('POST', pathFor(event) + '/album', {target:'integration-test'}, 202);
+  return waitFor(event, s => s.job.status === 'completed');
+}
+await control({fail_validate:true});
+const early = await provisionedEvent('Early album');
+await waitFor(early, s => s.job.status === 'failed');
+await upload(early);
+const earlyFailedJob = (await status(early)).job.id;
+await control({});
+await new Promise(resolve => setTimeout(resolve, 1200));
+assert.equal((await status(early)).job.id, earlyFailedJob);
+assert.equal((await status(early)).job.status, 'failed', 'failed setup auto-retried');
+const beforeEarly = await control();
+const earlyReady = await retryAlbum(early);
+assert.equal(earlyReady.album_name, 'Early album');
+assert.equal(earlyReady.album_url, `http://localhost:22830/albums/${earlyReady.album_id}`);
+assert.equal(earlyReady.new,1); assert.equal(earlyReady.imported,0);
+assert.equal((await control()).uploads,beforeEarly.uploads);
+assert.equal((await remote('GET', `/albums/${earlyReady.album_id}`)).assetCount,0);
+await remote('PATCH', `/albums/${earlyReady.album_id}`, {albumName:'Renamed early album'},200,true);
+assert.equal((await send(early)).album_id,earlyReady.album_id);
+await upload(early);
+assert.equal((await status(early)).new,1);
+assert.equal((await remote('GET', `/albums/${earlyReady.album_id}`)).assetCount,1);
+const existingEmpty = await createEvent('Existing empty');
+assert.equal((await retryAlbum(existingEmpty)).total,0);
+const beforeLostAlbum = await control();
+await control({lose_album:true});
+const lostAlbum = await provisionedEvent('Lost album response');
+assert.equal((await waitFor(lostAlbum,s=>s.job.status==='failed')).album_state,'creating');
+await retryAlbum(lostAlbum);
+assert.equal((await control()).album_creates-beforeLostAlbum.album_creates,1);
+const beforeRestartAlbum = await control();
+await control({album_delay_ms:10000});
+const restartAlbum = await provisionedEvent('Interrupted album creation');
+const deadlineAlbum=Date.now()+30000;
+while ((await control()).album_creates===beforeRestartAlbum.album_creates) {
+  assert.ok(Date.now()<deadlineAlbum,'remote album was not created');
+  await new Promise(resolve=>setTimeout(resolve,100));
+}
+compose(['kill','-s','SIGKILL','photodrop']);
+await control({}); await restart();
+assert.equal((await waitFor(restartAlbum,s=>s.job.status==='completed')).total,0);
+assert.equal((await control()).album_creates-beforeRestartAlbum.album_creates,1);
+console.log('Early/empty provisioning, outage isolation, manual retry/import, rename, lost album response and restart without duplicate albums passed.');
 const event = await createEvent('Gate 6 lifecycle');
 const local = await upload(event);
 await restart('s3-a'); const a = await upload(event, video('mp4', true), 'clip.mp4', 'video/mp4');

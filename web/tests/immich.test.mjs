@@ -1,7 +1,33 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { importView } from '../src/lib/immich.ts';
+import { importView, initialTarget, suggestedAlbum } from '../src/lib/immich.ts';
 const base = { target: { key: 'home', available: true }, total: 10, imported: 6, duplicate: 1, failed: 1, pending: 0, new: 2 };
+test('new-event defaults and album name follow only before manual editing', () => {
+  const targets = [{ key: 'offline', available: false }, { key: 'home', available: true }];
+  assert.equal(initialTarget({ active_target: '', targets: [] }), '');
+  assert.equal(initialTarget({ active_target: 'offline', targets }), 'offline');
+  assert.equal(initialTarget({ active_target: '', targets }), 'home');
+  assert.equal(suggestedAlbum('Wedding', null), 'Wedding');
+  assert.equal(suggestedAlbum('Wedding renamed', null), 'Wedding renamed');
+  assert.equal(suggestedAlbum('Wedding renamed', 'Our album'), 'Our album');
+  assert.equal(suggestedAlbum('Wedding renamed', ''), '');
+});
+test('album-only setup works without media, blocks duplicate work, and allows manual retry', () => {
+  const empty = { ...base, total: 0, imported: 0, duplicate: 0, failed: 0, pending: 0, new: 0 };
+  assert.equal(importView(empty, false).canProvision, true);
+  assert.equal(importView(empty, false).canSend, false);
+  for (const state of ['queued', 'running']) assert.equal(importView({ ...empty, job: { status: state } }, false).canProvision, false);
+  assert.equal(importView({ ...empty, job: { status: 'failed' } }, false).canProvision, true);
+  assert.equal(importView({ ...empty, job: { status: 'failed' } }, false).albumLabel, 'Album setup needs attention');
+  assert.equal(importView({ ...empty, target: { available: false } }, false).canProvision, false);
+  assert.equal(importView({ ...empty, album_id: 'saved' }, false).canProvision, false);
+  const laterUpload = { ...empty, album_id: 'saved', total: 1, new: 1 };
+  assert.equal(importView(laterUpload, false).canSend, true);
+  assert.equal(importView(laterUpload, false).canRetry, false);
+  const selected = { ...empty, pending: 1, job: { status: 'failed' } };
+  assert.equal(importView(selected, false).canProvision, false);
+  assert.equal(importView(selected, false).canRetry, true);
+});
 test('incremental import and failed retry counts remain separate', () => {
   const view = importView(base, false);
   assert.equal(view.accounted, 7); assert.equal(view.sendCount, 2);

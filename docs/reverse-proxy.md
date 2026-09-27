@@ -55,5 +55,8 @@ PhotoDrop         -> Immich HTTP API
 ```
 
 The same NAS/host is fine; never mount Immich's managed library into PhotoDrop.
-Each target has one origin used for API calls and browser links. Choose an origin
-reachable by both or appropriate split DNS. Separate internal/public URLs are unsupported.
+Each target's `PHOTODROP_IMMICH_<KEY>_URL` is the server API origin and may use
+an internal network address. Optionally set `PHOTODROP_IMMICH_<KEY>_PUBLIC_URL`
+to the browser origin (for example `https://photos.example.com`) to show an
+album link in the admin. Without it no link is shown. The public URL can change
+without changing the persisted API-server identity; recreate PhotoDrop afterward.

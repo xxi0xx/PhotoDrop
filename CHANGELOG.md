@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Optional Immich album setup during event creation and before any media exists,
+  with persistent background provisioning, retry/restart recovery, and separate
+  public browser URLs. Media imports remain manual.
+
 - MP4 and QuickTime MOV uploads alongside images, through the existing local/S3,
   quota, export and Immich pipelines. Original bytes are preserved; no transcoding
   or playback UI. No database migration or persisted API/schema renaming.

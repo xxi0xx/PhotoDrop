@@ -29,14 +29,33 @@ type fakeAPI struct {
 	blockAfter                                                 int
 	gate, entered                                              chan struct{}
 	marker                                                     string
+	validateErr                                                error
+	validations                                                int
+	loseAlbum                                                  bool
+	albumEntered                                               chan struct{}
 }
 
-func (f *fakeAPI) Validate(context.Context) (Version, error) { return Version{3, 2, 1}, nil }
-func (f *fakeAPI) CreateAlbum(_ context.Context, name, marker string) (Album, error) {
+func (f *fakeAPI) Validate(context.Context) (Version, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.validations++
+	return Version{3, 2, 1}, f.validateErr
+}
+func (f *fakeAPI) CreateAlbum(ctx context.Context, name, marker string) (Album, error) {
+	f.mu.Lock()
 	f.albumCreates++
 	f.marker = marker
+	lost, entered := f.loseAlbum, f.albumEntered
+	f.loseAlbum = false
+	f.mu.Unlock()
+	if entered != nil {
+		close(entered)
+		<-ctx.Done()
+		return Album{}, ctx.Err()
+	}
+	if lost {
+		return Album{}, ErrUnavailable
+	}
 	return Album{albumUUID, name, marker}, nil
 }
 func (f *fakeAPI) Album(context.Context, string) (Album, error) {

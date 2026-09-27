@@ -32,6 +32,26 @@ func (a *application) immichStatus(w http.ResponseWriter, r *http.Request, _ aut
 	}
 	writeJSON(w, 200, status)
 }
+
+func (a *application) immichTargets(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	writeJSON(w, 200, a.immich.TargetCatalog())
+}
+
+func (a *application) immichProvision(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	var input struct {
+		Target    string `json:"target"`
+		AlbumName string `json:"album_name"`
+	}
+	if !decodeJSON(w, r, &input, 4096) {
+		return
+	}
+	id, err := a.immich.Provision(r.Context(), internalID(r), input.Target, input.AlbumName)
+	if err != nil {
+		a.immichFailure(w, err)
+		return
+	}
+	writeJSON(w, 202, map[string]int64{"job_id": id})
+}
 func (a *application) immichTest(w http.ResponseWriter, r *http.Request, _ auth.Session) {
 	var input struct {
 		Target string `json:"target"`

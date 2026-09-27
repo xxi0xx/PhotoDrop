@@ -1,6 +1,6 @@
 # Portable export and optional Immich integration
 
-Gate 6 adds two independent ways to keep an event's ready photos. Export writes
+PhotoDrop provides two independent ways to keep an event's ready media. Export writes
 ordinary files and JSON. The native Immich integration sends independent copies
 through Immich's HTTP API. Neither feature changes guest uploads, quotas,
 Turnstile verification, or the one-container PhotoDrop deployment.
@@ -125,6 +125,7 @@ from the PhotoDrop container, which may differ from your browser's address.
 PHOTODROP_IMMICH_TARGET=home
 PHOTODROP_IMMICH_TARGETS=home
 PHOTODROP_IMMICH_HOME_URL=https://photos.example.com
+PHOTODROP_IMMICH_HOME_PUBLIC_URL=https://photos.example.com
 PHOTODROP_IMMICH_HOME_API_KEY=your-private-api-key
 ```
 
@@ -146,6 +147,7 @@ services:
       PHOTODROP_IMMICH_TARGET: home
       PHOTODROP_IMMICH_TARGETS: home
       PHOTODROP_IMMICH_HOME_URL: '${PHOTODROP_IMMICH_HOME_URL}'
+      PHOTODROP_IMMICH_HOME_PUBLIC_URL: '${PHOTODROP_IMMICH_HOME_PUBLIC_URL:-}'
       PHOTODROP_IMMICH_HOME_API_KEY: '${PHOTODROP_IMMICH_HOME_API_KEY}'
 ```
 
@@ -171,6 +173,15 @@ Omitting historical credentials keeps their records visible and makes operations
 on that target safely unavailable. Immich outages, invalid keys, failed jobs,
 and missing credentials do not change `/healthz`.
 
+`PHOTODROP_IMMICH_<KEY>_PUBLIC_URL` is an optional browser origin. It follows the
+same HTTP(S) origin validation, but is not persisted and is not part of immutable
+server identity. Recreate PhotoDrop after changing it. API requests always use
+`_URL`; the admin's **Open in Immich** link uses only `_PUBLIC_URL` and the saved
+album ID. An absent public URL means no link, even if the API URL is reachable
+in a browser. The `/albums/{albumId}` route is verified against the
+[Immich v3.2.1 web source](https://github.com/immich-app/immich/tree/v3.2.1/web/src/routes).
+Opening it uses your existing Immich browser login; PhotoDrop supplies no token.
+
 ## Minimum API-key permissions
 
 Create a key in your Immich account's API-key settings with exactly:
@@ -194,15 +205,52 @@ and [official API documentation](https://docs.immich.app/api/).
 
 ## Albums, jobs, and recovery
 
-Open an existing event in the admin, test the target connection, optionally
-change the initial album name, then send its unimported photos. A short protected
+Unreleased v1.1: **New event** offers optional **Create an Immich album for this
+event** when known targets exist. The album name follows the event name until
+you edit it. Choose a target and save: one SQLite transaction creates the event,
+binding, random album marker, and durable job. The HTTP request performs no
+Immich networking. Known historical targets without credentials remain selectable
+with an explicit warning; the event is usable while the failed job awaits repair.
+A brand-new target needs its API origin configured once to establish its identity.
+
+Album setup works with zero media. The management page shows preparing, ready,
+or needs-attention state. Existing events can use **Create Immich album** too.
+This selects no media, including files arriving while setup runs. Uploading media
+never schedules an import: **Send to Immich** remains an explicit administrator
+action. Without optional setup, event creation is unchanged.
+
+If setup fails, the event, guest page and uploads remain available. Restore
+credentials/connectivity and choose **Retry album setup**. Failed jobs do not
+automatically retry. For a failed manual import that already selected media, use
+**Retry unfinished import** instead; it also handles failure before the first
+upload. Queued/running jobs prevent concurrent duplicate submissions.
+
+API additions (administrator session required; mutations also require Origin
+and CSRF validation):
+
+- `GET /api/admin/immich/targets` returns known target keys, local credential
+  availability, configured active target and optional browser origin. It performs
+  no health probe and never returns internal API origins or API keys.
+- `POST /api/admin/events` accepts optional
+  `"immich":{"target":"home","album_name":"Wedding"}`. Success remains 201 with
+  the event. Invalid configuration rolls back both event and binding.
+- `POST /api/admin/events/{id}/immich/album` accepts `target` and optional
+  `album_name`, returning 202 with `job_id`. Empty names use the stored name or
+  event name. Album-only work uses an existing `new` job with no selected assets;
+  no schema migration or second worker is introduced.
+- Existing `GET /api/admin/events/{id}/immich` adds `album_state` and optional
+  `album_url`. Without an explicit target query it shows the event's latest
+  binding, then falls back to the deployment default.
+
+For manual imports, open the existing Immich panel, test the target connection,
+optionally change the initial album name, then send unimported media. A protected
 POST commits a SQLite job and returns HTTP 202. The existing Go process runs one
 job at a time with at most **three concurrent uploads**, then persists progress
 for each photo. The page polls every two seconds; leaving the page does not stop
 the job. Transfers stream local/S3 bodies through `io.Pipe` multipart requests
 directly to Immich. No full-file staging or PhotoDrop content-hash system is used.
 
-The first import creates a dedicated album, defaulting to the event name. Its
+Album setup (or the first manual import) creates a dedicated album, defaulting to the event name. Its
 Immich album ID is saved and used thereafter; external album renaming is safe.
 PhotoDrop does not search by name and select an arbitrary existing album.
 A random marker is put in the album description to reconcile an uncertain first
@@ -293,7 +341,9 @@ four required permissions. It also starts two signed S3 test endpoints and a
 test-only proxy that forces failures/response loss against the **real** Immich
 API. The proxy cannot be selected by the production executable.
 
-The smoke script validates mixed export hashes, auth, album create/rename,
+The smoke script validates early/empty provisioning, outage isolation, manual
+retry, lost album response and restart recovery without duplicate albums,
+mixed export hashes, auth, album create/rename,
 upload/assignment, incremental work, failure/retry, real duplicate reconciliation,
 abrupt process restart, outage/missing-key health, and independent deletion.
 `--browser` leaves a fresh event and generated image in ignored `.tmp/` for
