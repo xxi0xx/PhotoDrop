@@ -1,5 +1,9 @@
 # Troubleshooting
 
+For SSO failures, see [OIDC troubleshooting](oidc.md). Provider outages affect new
+SSO sign-ins only; existing local sessions, password fallback when enabled, and
+guest uploads remain independent. Do not share callback URLs or provider tokens.
+
 Start with safe diagnostics:
 
 ```sh

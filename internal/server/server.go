@@ -35,9 +35,12 @@ func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS,
 	if err != nil {
 		return nil, fmt.Errorf("read embedded frontend (run npm ci and npm run build in web/ before building Go): %w", err)
 	}
-	admin, err := auth.New(ctx, db, cfg.AdminPassword)
-	if err != nil {
-		return nil, err
+	admin := auth.NewSessionOnly(db)
+	if cfg.PasswordEnabled() {
+		admin, err = auth.New(ctx, db, cfg.AdminPassword)
+		if err != nil {
+			return nil, err
+		}
 	}
 	objects, err := storage.NewLocal(filepath.Join(cfg.DataDir, "uploads"))
 	if err != nil {
@@ -86,6 +89,11 @@ func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS,
 		}
 	}
 	app.immich = imports
+	app.passwordEnabled = cfg.PasswordEnabled()
+	if cfg.OIDCEnabled() {
+		app.oidc = auth.NewOIDC(db, cfg.OIDC, cfg.BaseURL)
+	}
+	app.oidcSlots = make(chan struct{}, 2)
 	mux := http.NewServeMux()
 	app.routes(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

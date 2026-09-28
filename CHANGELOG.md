@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- Native OIDC administrator sign-in with Authentik setup guidance, explicit
+  subject/group authorization, authorization-code + PKCE, browser-bound one-time
+  transactions and existing local sessions. Password-only remains the default;
+  optional OIDC-only and combined modes isolate provider outages from uploads.
+  Migration 011 adds short-lived login transactions without changing session schema.
+
 - Opt-in automatic Immich import per event/target, with durable bounded
   reconciliation, coalesced jobs and restart recovery. Failed imports still need
   manual retry. Migration 010 defaults existing bindings to manual-only.
