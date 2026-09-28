@@ -2,6 +2,7 @@ package auth
 
 import (
 	"database/sql"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +16,41 @@ import (
 	"photodrop/internal/database"
 	"photodrop/internal/testutil/oidctest"
 )
+
+func TestOIDCProviderTransportBoundsAndRedirects(t *testing.T) {
+	var redirected atomic.Int32
+	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer destination.Close()
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/redirect" {
+			http.Redirect(w, r, destination.URL, http.StatusTemporaryRedirect)
+			return
+		}
+		io.WriteString(w, strings.Repeat("x", (1<<20)+1))
+	}))
+	defer remote.Close()
+	s := NewOIDC(nil, config.OIDC{}, "https://drop.test")
+	for _, path := range []string{"/redirect", "/oversized"} {
+		r, err := http.NewRequestWithContext(t.Context(), "POST", remote.URL+path, strings.NewReader("private-token-request"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.SetBasicAuth("private-client", "private-secret")
+		response, err := s.client.Do(r)
+		if response != nil {
+			response.Body.Close()
+		}
+		if err == nil {
+			t.Fatal("provider redirect/oversized response accepted", path)
+		}
+	}
+	if redirected.Load() != 0 {
+		t.Fatal("provider redirect forwarded a confidential request")
+	}
+}
 
 func oidcFixture(t *testing.T) (*OIDC, *oidctest.Provider, *sql.DB) {
 	t.Helper()

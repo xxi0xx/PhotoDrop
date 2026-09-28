@@ -152,6 +152,7 @@ password in a password-enabled mode. Do not edit tokens or invent a user table.
   query strings; PhotoDrop itself logs only generic login outcomes.
 
 See [configuration](configuration.md), [upgrade](upgrading.md), and
-[backup/restore](backup-restore.md). No Authentik forward-auth, guest OIDC,
+[backup/restore](backup-restore.md), plus the [validation record](v11-phase4-validation.md).
+No Authentik forward-auth, guest OIDC,
 token refresh, provider logout propagation or separate authentication container
 is required by PhotoDrop.
