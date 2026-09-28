@@ -91,14 +91,16 @@ func TestAutoBurstAndConcurrentReconciliation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			// Bound entry into the gate, not the full 100-asset race-instrumented
+			// import. Slow runners must not turn successful work into cancellation.
+			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			done := make(chan struct{})
 			go func() { defer close(done); s.execute(ctx, j) }()
 			defer func() { cancel(); <-done }()
 			select {
 			case <-f.entered:
-			case <-ctx.Done():
+			case <-time.After(10 * time.Second):
 				t.Fatal("worker did not enter upload")
 			}
 			for i := range 3 {
@@ -111,8 +113,8 @@ func TestAutoBurstAndConcurrentReconciliation(t *testing.T) {
 			close(f.gate)
 			<-done
 			f.gate = nil
-			if status(t, s, e).Imported != int64(count) {
-				t.Fatal("late assets consumed by old job")
+			if got := status(t, s, e); got.Imported != int64(count) {
+				t.Fatal("selected job did not import exactly its original assets", got)
 			}
 			reconcileNow(t, s)
 			reconcileNow(t, s)

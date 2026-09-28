@@ -34,6 +34,9 @@ func New(ctx context.Context, db *sql.DB, password string) (*Manager, error) {
 	return initialize(ctx, db, password, PasswordCost)
 }
 
+// NewSessionOnly never reads or enables a historical password credential.
+func NewSessionOnly(db *sql.DB) *Manager { return &Manager{db: db} }
+
 func initialize(ctx context.Context, db *sql.DB, password string, cost int) (*Manager, error) {
 	if len(password) < 12 || len(password) > 72 {
 		return nil, fmt.Errorf("administrator password must contain 12 to 72 bytes")
@@ -94,9 +97,19 @@ func validToken(token string) bool {
 // Login always creates a new token and revokes the supplied previous session.
 // Only the token's SHA-256 digest is persisted; the bearer token is never stored.
 func (m *Manager) Login(ctx context.Context, password, previous string) (string, Session, error) {
-	if len(password) > 72 || bcrypt.CompareHashAndPassword(m.passwordHash, []byte(password)) != nil {
+	if len(m.passwordHash) == 0 || len(password) > 72 || bcrypt.CompareHashAndPassword(m.passwordHash, []byte(password)) != nil {
 		return "", Session{}, ErrUnauthorized
 	}
+	return m.createSession(ctx, previous, true)
+}
+
+// CreateSession is for a successfully verified and authorized external login.
+// Both methods use the same opaque tokens, expiry, rotation and CSRF mechanism.
+func (m *Manager) CreateSession(ctx context.Context, previous string) (string, Session, error) {
+	return m.createSession(ctx, previous, false)
+}
+
+func (m *Manager) createSession(ctx context.Context, previous string, passwordLogin bool) (string, Session, error) {
 	now := time.Now().UTC()
 	session := Session{CSRFToken: randomToken(), ExpiresAt: now.Add(SessionLifetime).Truncate(time.Second)}
 	token := randomToken()
@@ -109,8 +122,8 @@ func (m *Manager) Login(ctx context.Context, password, previous string) (string,
 		return "", Session{}, fmt.Errorf("remove old sessions: %w", err)
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO admin_sessions (token_hash, csrf_token, created_at, expires_at)
-	    SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM admin_credential WHERE id = 1 AND password_hash = ?)`,
-		tokenHash(token), session.CSRFToken, now.Unix(), session.ExpiresAt.Unix(), string(m.passwordHash))
+	    SELECT ?, ?, ?, ? WHERE ?=0 OR EXISTS (SELECT 1 FROM admin_credential WHERE id = 1 AND password_hash = ?)`,
+		tokenHash(token), session.CSRFToken, now.Unix(), session.ExpiresAt.Unix(), passwordLogin, string(m.passwordHash))
 	if err != nil {
 		return "", Session{}, fmt.Errorf("create session: %w", err)
 	}
@@ -134,8 +147,7 @@ func (m *Manager) Lookup(ctx context.Context, token string) (Session, error) {
 	var session Session
 	var expires int64
 	err := m.db.QueryRowContext(ctx, `SELECT csrf_token, expires_at FROM admin_sessions
-	    WHERE token_hash = ? AND expires_at > ?
-	    AND EXISTS (SELECT 1 FROM admin_credential WHERE id = 1 AND password_hash = ?)`, tokenHash(token), time.Now().Unix(), string(m.passwordHash)).Scan(&session.CSRFToken, &expires)
+	    WHERE token_hash = ? AND expires_at > ?`, tokenHash(token), time.Now().Unix()).Scan(&session.CSRFToken, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrUnauthorized
 	}

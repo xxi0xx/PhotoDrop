@@ -24,6 +24,16 @@ identity and import history are preserved. Enable automatic import explicitly
 after checking a binding. Back up before this schema upgrade; use the pre-upgrade
 backup and old image for rollback, not an older binary against the upgraded data.
 
+Unreleased Phase 4 adds migration 011, only the short-lived `oidc_transactions`
+table and expiry index. Migrations 001–010 and the `admin_sessions` schema are
+unchanged. With no ADMIN_AUTH setting, an upgraded Phase 3 deployment remains
+password-only; its bcrypt hash and unexpired sessions survive ordinary restart.
+Switching to `password+oidc` preserves them, and `oidc` requires no password but
+disables its endpoint even if a historical credential remains. Test SSO before
+removing the password fallback. A changed password in a password-enabled mode
+still revokes all sessions. Restore the stopped pre-upgrade backup with the old
+image for rollback; do not remove migration 011 manually. See [OIDC](oidc.md).
+
 Migrations move forward. Never edit, rename, remove or renumber a released migration.
 Downgrading may fail or be unsafe. Supported rollback: stop the new app, restore a
 complete pre-upgrade backup into a separate directory with matching configuration

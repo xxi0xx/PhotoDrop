@@ -71,6 +71,7 @@ versions are not independently verified. See [export and Immich](docs/export-imm
 | Task | Guide |
 | --- | --- |
 | Install and configure | [Install](docs/install.md), [environment reference](docs/configuration.md) |
+| Administrator sign-in | [Password and native OIDC / Authentik](docs/oidc.md) |
 | Expose safely | [Reverse proxy / HTTPS](docs/reverse-proxy.md), [security controls](docs/security.md), [Turnstile](docs/turnstile.md) |
 | Choose storage | [S3/R2](docs/storage.md), [historical backends](docs/storage-backends.md) |
 | Share and collect | [Guest and administrator UX](docs/production-ux.md) |

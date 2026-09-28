@@ -69,3 +69,11 @@ turn the policy off if the restored copy must not select new work. Isolate the
 network or withhold Immich keys during
 verification, then restore matching credentials. See [upgrading](upgrading.md)
 and [tested scenarios](gate-8-validation.md).
+
+Migration 011 adds short-lived OIDC transactions to `/data/photodrop.db`; their
+PKCE verifiers are sensitive even though state/nonce/browser bindings are hashed.
+Protect the whole backup. No provider tokens or codes are stored. After restore,
+start a fresh OIDC sign-in rather than trying to reuse a callback from an old
+browser tab. Preserve private client/issuer/allowlist configuration separately.
+Existing PhotoDrop sessions can survive restore until their original expiry;
+revocation guidance is in [OIDC authentication](oidc.md).

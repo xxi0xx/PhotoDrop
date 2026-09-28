@@ -17,6 +17,8 @@ type Config struct {
 	DataDir           string
 	BaseURL           string
 	AdminPassword     string `json:"-"`
+	AdminAuth         string
+	OIDC              OIDC `json:"-"`
 	MaxFileSize       int64
 	StorageProvider   string
 	StorageBackendKey string
@@ -80,7 +82,10 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		}
 		cfg.BaseURL = strings.TrimSuffix(u.String(), "/")
 	}
-	if len(cfg.AdminPassword) < 12 || len(cfg.AdminPassword) > 72 || strings.TrimSpace(cfg.AdminPassword) == "" || strings.ContainsRune(cfg.AdminPassword, '\x00') {
+	if err := cfg.loadAuth(lookup); err != nil {
+		return Config{}, err
+	}
+	if cfg.PasswordEnabled() && (len(cfg.AdminPassword) < 12 || len(cfg.AdminPassword) > 72 || strings.TrimSpace(cfg.AdminPassword) == "" || strings.ContainsRune(cfg.AdminPassword, '\x00')) {
 		return Config{}, fmt.Errorf("PHOTODROP_ADMIN_PASSWORD is required and must contain 12 to 72 bytes; no default administrator password is provided")
 	}
 	if err := cfg.loadStorage(lookup); err != nil {

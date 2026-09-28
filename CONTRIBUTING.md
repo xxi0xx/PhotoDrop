@@ -43,6 +43,7 @@ sh scripts/smoke-compose.sh
 node scripts/smoke-backends.mjs
 node scripts/smoke-fresh.mjs
 node scripts/smoke-release.mjs
+node scripts/smoke-oidc.mjs
 docker compose -f scripts/compose-immich-test.yml build
 node scripts/smoke-immich.mjs
 ```
@@ -54,10 +55,13 @@ retains browser fixtures; remove only that test project's data afterward.
 The fresh-install smoke copies only public Git-visible files into a temporary
 directory, uses empty local/S3 state and an ephemeral password, and cleans its own
 project. Its test-only overlay needs Compose 2.24.4+ for reset/override tags.
-The release smoke builds exact merged Gate 7 source and the candidate, seeds
+The release smoke builds exact merged v1.1 Phase 3 source and the candidate, seeds
 local/S3 and completed Immich metadata, then tests a stopped backup, upgrade and
 destructive restore using uniquely named disposable volumes. Neither reads the
 developer `.env` or mounts production data.
+The OIDC smoke runs its own signed provider with PKCE/JWKS and fault injection;
+it never contacts an owner's identity provider. `--browser` retains only that
+named disposable fixture for UI validation. Use it for authentication changes.
 Run the real Immich suite for integration, storage/read/export, migration, worker,
 or container changes. CI runs it on relevant paths. Do not replace it with mocks.
 

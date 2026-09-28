@@ -16,11 +16,35 @@ application defaults. Empty required values fail startup.
 | `PHOTODROP_LISTEN_ADDR` | `:8080` | TCP host:port, numeric port 1–65535; Compose fixes `:8080` | Internal address |
 | `PHOTODROP_DATA_DIR` | `/data` | Nonempty filesystem path; Compose fixes `/data` | Private state path / local backend root |
 | `PHOTODROP_BASE_URL` | empty | HTTP(S) origin, optional trailing slash, no subpath/userinfo/query/fragment | Public; links, origin checks, secure cookies/HSTS |
-| `PHOTODROP_ADMIN_PASSWORD` | Required | 12–72 bytes, not whitespace-only, no NUL; change + restart revokes sessions | Secret |
+| `PHOTODROP_ADMIN_AUTH` | `password` | Exact `password`, `oidc`, or `password+oidc`; selects enabled login methods | Policy |
+| `PHOTODROP_ADMIN_PASSWORD` | Required in `password` and `password+oidc`; ignored in `oidc` | 12–72 bytes, not whitespace-only, no NUL; change + restart in a password-enabled mode revokes all local sessions | Secret |
 | `PHOTODROP_MAX_FILE_SIZE` | `52428800` | Integer bytes 1–1073741824 | Public limit |
 
 No separate admin username, session-secret, database URL or TLS-certificate
 variable exists. Event quotas are set in the UI, not environment.
+
+## Native OIDC administrator login
+
+OIDC modes require `PHOTODROP_BASE_URL`: HTTPS public origin, HTTP only for
+localhost/loopback development. Callback is exactly
+`${PHOTODROP_BASE_URL}/api/admin/oidc/callback`, never derived from request headers.
+All environment changes require restart; these settings do not affect storage or
+Immich backend identity. Password mode ignores OIDC settings and contacts no provider.
+
+| Variable | Default / required in OIDC modes | Format and effect | Sensitivity |
+| --- | --- | --- | --- |
+| `PHOTODROP_OIDC_ISSUER` | Required | Exact absolute HTTPS URL, paths/trailing slash preserved; no userinfo/query/fragment; HTTP only on loopback | Provider address |
+| `PHOTODROP_OIDC_CLIENT_ID` | Required | Nonempty client ID, at most 4096 bytes, no control characters | Internal identifier |
+| `PHOTODROP_OIDC_CLIENT_SECRET` | Required | Confidential client secret, at most 4096 bytes, no control characters | Secret |
+| `PHOTODROP_OIDC_ALLOWED_SUBJECTS` | Empty; one allowlist required | Comma-separated exact stable `sub` values, trimmed around commas; at most 64 entries, 512 bytes each, 8192 total; no empty entries/control characters | Private authorization policy |
+| `PHOTODROP_OIDC_ALLOWED_GROUPS` | Empty; one allowlist required | Same list format; exact case-sensitive group names | Private authorization policy |
+| `PHOTODROP_OIDC_GROUPS_CLAIM` | `groups` | Top-level ID-token JSON claim name, at most 256 bytes, no whitespace/control characters; array of strings required when present and group authorization enabled | Claim mapping |
+| `PHOTODROP_OIDC_SCOPES` | `openid profile email` | Single-space-separated OAuth scope tokens, at most 1024 bytes; printable ASCII excluding quote/backslash; `openid` always added, duplicates removed | Requested claims |
+
+Subject allowlist **OR** any allowed group grants the same PhotoDrop administrator
+access. Email/name is never an authorization boundary. Malformed group claims fail
+closed; a missing group claim cannot satisfy group authorization. Claims must be
+in the ID token, not only UserInfo. See [OIDC and Authentik setup](oidc.md).
 
 ## Security and grants
 

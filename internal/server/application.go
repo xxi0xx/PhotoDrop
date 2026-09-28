@@ -26,19 +26,22 @@ import (
 const sessionCookie = "photodrop_session"
 
 type application struct {
-	events         *events.Store
-	auth           *auth.Manager
-	media          *media.Service
-	immich         *immich.Service
-	maxFileSize    int64
-	baseURL        string
-	index          []byte
-	logger         *slog.Logger
-	security       config.Security
-	limiter        *abuse.Limiter
-	verifier       abuse.Verifier
-	challengeSlots chan struct{}
-	loginSlots     chan struct{}
+	events          *events.Store
+	auth            *auth.Manager
+	media           *media.Service
+	immich          *immich.Service
+	maxFileSize     int64
+	baseURL         string
+	index           []byte
+	logger          *slog.Logger
+	security        config.Security
+	limiter         *abuse.Limiter
+	verifier        abuse.Verifier
+	challengeSlots  chan struct{}
+	loginSlots      chan struct{}
+	passwordEnabled bool
+	oidc            *auth.OIDC
+	oidcSlots       chan struct{}
 }
 
 func (a *application) routes(mux *http.ServeMux) {
@@ -54,6 +57,9 @@ func (a *application) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets/{asset_id}/authorize", a.guarded("authorize", a.authorizeAsset))
 	mux.HandleFunc("POST /api/public/events/{public_id}/upload-sessions/{session_id}/assets/{asset_id}/complete", a.guarded("complete", a.completeAsset))
 	mux.HandleFunc("POST /api/admin/login", a.guarded("login", a.login))
+	mux.HandleFunc("GET /api/admin/auth/methods", a.authMethods)
+	mux.HandleFunc("GET /api/admin/oidc/login", a.oidcRoute(a.oidcLogin))
+	mux.HandleFunc("GET /api/admin/oidc/callback", a.oidcRoute(a.oidcCallback))
 	mux.HandleFunc("POST /api/admin/logout", a.protected(a.logout))
 	mux.HandleFunc("GET /api/admin/session", a.protected(func(w http.ResponseWriter, r *http.Request, s auth.Session) { writeJSON(w, 200, s) }))
 	mux.HandleFunc("GET /api/admin/events", a.protected(a.listEvents))
@@ -69,6 +75,7 @@ func (a *application) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin/events/{id}/immich/jobs", a.protected(a.immichStart))
 	mux.HandleFunc("POST /api/admin/events/{id}/immich/cancel", a.protected(a.immichCancel))
 	for path, methods := range map[string]string{
+		"/api/admin/auth/methods": "GET, HEAD", "/api/admin/oidc/login": "GET", "/api/admin/oidc/callback": "GET",
 		"/api/admin/immich/targets": "GET, HEAD", "/api/admin/events/{id}/immich/album": "POST",
 		"/api/admin/events/{id}/immich/auto-import": "PUT",
 		"/api/admin/events/{id}/immich":             "GET, HEAD", "/api/admin/events/{id}/immich/test": "POST", "/api/admin/events/{id}/immich/jobs": "POST", "/api/admin/events/{id}/immich/cancel": "POST",
@@ -268,6 +275,10 @@ func (a *application) setCookie(w http.ResponseWriter, r *http.Request, token st
 }
 
 func (a *application) login(w http.ResponseWriter, r *http.Request) {
+	if !a.passwordEnabled {
+		apiError(w, 403, "login_disabled", "Password sign-in is disabled", nil)
+		return
+	}
 	if !a.sameOrigin(w, r) {
 		return
 	}

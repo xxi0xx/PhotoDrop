@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { photo } from './photo-fixture.mjs';
 
-const baseline = process.argv.includes('--gate7') ? '6b7d046' : '73b7eee9c7c252dedf8a441a38971c144403c247'; // Immutable Phase 2 (or older Gate 7) baseline.
+const baseline = process.argv.includes('--gate7') ? '6b7d046' : 'e5a97e49bdadb740389f01cade7a88065eb57f70'; // Immutable Phase 3 (or older Gate 7) baseline.
 const id = `photodrop-release-${randomBytes(5).toString('hex')}`;
 const dir = mkdtempSync(join(tmpdir(), id));
 const oldImage = `${id}:baseline`, image = `${id}:candidate`, toolsImage = `${id}:tools`;
@@ -26,7 +26,6 @@ const cfg = {
   PHOTODROP_S3_RELEASE_S3_ACCESS_KEY_ID: 'test-s3-access',
   PHOTODROP_S3_RELEASE_S3_SECRET_ACCESS_KEY: 'test-s3-secret-for-local-tests-only',
 };
-const env = Object.entries(cfg).flatMap(([key, value]) => ['-e', `${key}=${value}`]);
 async function call(method, path, value, expected = 200, admin = true) {
   const headers = { Origin: base, 'Content-Type': 'application/json' };
   if (admin) { headers.Cookie = cookie; headers['X-CSRF-Token'] = csrf; }
@@ -34,7 +33,10 @@ async function call(method, path, value, expected = 200, admin = true) {
   assert.equal(response.status, expected, `${method} ${path}: unexpected status`);
   return { response, body: expected === 204 ? null : await response.json() };
 }
-async function start(tag, volume, provider = 'local') {
+async function start(tag, volume, provider = 'local', mode) {
+  const settings={...cfg};
+  if(mode){Object.assign(settings,{PHOTODROP_ADMIN_AUTH:mode,PHOTODROP_OIDC_ISSUER:'http://localhost:18999/application/o/unavailable/',PHOTODROP_OIDC_CLIENT_ID:'restore-test',PHOTODROP_OIDC_CLIENT_SECRET:'restore-test-only-secret',PHOTODROP_OIDC_ALLOWED_GROUPS:'restore-admins'});if(mode==='oidc')delete settings.PHOTODROP_ADMIN_PASSWORD;}
+  const env=Object.entries(settings).flatMap(([key,value])=>['-e',`${key}=${value}`]);
   docker(['run', '-d', '--name', app, '--network', `container:${objects}`, '-v', `${volume}:/data`, ...env,
     '-e', `PHOTODROP_STORAGE_PROVIDER=${provider}`, '-e', `PHOTODROP_STORAGE_BACKEND_KEY=${provider === 's3' ? 'release-s3' : ''}`, tag]);
   running = true;
@@ -71,7 +73,7 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 
 try {
   const oldMigrations = execFileSync('git', ['ls-tree','-r','--name-only',baseline,'--','migrations'],{encoding:'utf8'}).trim().split('\n').filter(path=>path.endsWith('.sql'));
-  assert.equal(oldMigrations.length,9);
+  assert.equal(oldMigrations.length,process.argv.includes('--gate7')?9:10);
   execFileSync('git', ['diff', '--exit-code', baseline, '--', ...oldMigrations]);
   const archive = join(dir, 'baseline.tar');
   execFileSync('git', ['archive', '--format=tar', '-o', archive, baseline]);
@@ -101,7 +103,7 @@ try {
   assert.equal(detailBefore.event.media.photo_count, 2);
   stop(); const before = state('seed', data);
   assert.equal(before.assets.filter(a => a.status === 'pending').length, 1);
-  assert.equal(before.schema_migrations.length, 9);
+  assert.equal(before.schema_migrations.length, oldMigrations.length);
   copyVolume(data, backup);
   const backedUpSession = {cookie, csrf};
   for (const [label, volume] of [['upgrade', data], ['restore', restored]]) {
@@ -124,18 +126,25 @@ try {
       const expected = entry.photoDropAssetId === local.id ? localBytes : remoteBytes;
       assert.equal(docker(['exec', app, 'sha256sum', `/data/export-${label}/photos/${entry.exportFilename}`]).split(' ')[0], sha(expected));
     }
+    // Runtime policy switches preserve the pre-existing local session, even with
+    // a completely unavailable provider and no password in OIDC-only mode.
+    for(const mode of ['password+oidc','oidc']){
+      stop();await start(image,volume,'local',mode);
+      await call('GET','/api/admin/session');
+      assert.deepEqual((await call('GET','/api/admin/auth/methods',undefined,200,false)).body,{password:mode!=='oidc',oidc:true});
+      await call('POST','/api/admin/login',{password},mode==='oidc'?403:200,false);
+    }
     stop();
     const after=state('snapshot',volume);
-    assert.equal(after.schema_migrations.length,10);
-    assert.deepEqual(after.schema_migrations.slice(0,9),before.schema_migrations);
-    const migration10=after.schema_migrations[9];
-    assert.equal(migration10.version,10);
-    assert.equal(migration10.name,'010_immich_auto_import.sql');
-    assert.equal(migration10.checksum,sha(readFileSync('migrations/010_immich_auto_import.sql','utf8').replaceAll('\r\n','\n')));
+    assert.equal(after.schema_migrations.length,11);
+    assert.deepEqual(after.schema_migrations.slice(0,oldMigrations.length),before.schema_migrations);
+    for(const entry of after.schema_migrations.slice(oldMigrations.length)){
+      assert.equal(entry.checksum,sha(readFileSync(`migrations/${entry.name}`,'utf8').replaceAll('\r\n','\n')));
+    }
     const expected=structuredClone(before);
     expected.schema_migrations=after.schema_migrations;
-    for(const binding of expected.immich_event_imports) binding.auto_import=0;
-    assert.deepEqual(after,expected,'upgrade changed data beyond the opt-in policy migration');
+    if(oldMigrations.length<10)for(const binding of expected.immich_event_imports) binding.auto_import=0;
+    assert.deepEqual(after,expected,'upgrade changed existing application data');
     console.log(`${label}: health, old/new login, event/public URL, local/S3 hashes, names, quotas, backend identity, pending/ready, migrations and Immich metadata passed.`);
   }
   console.log('Stopped backup and destructive disposable restore passed; S3 objects remained external and unchanged.');

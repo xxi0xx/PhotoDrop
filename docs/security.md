@@ -8,6 +8,22 @@ It assumes one application process per data directory and a trusted administrato
 and host. Compromised administrator/storage credentials, hostile host access,
 distributed limits, and full DDoS mitigation are outside this model.
 
+## Administrator authentication
+
+Password authentication remains the default. Unreleased v1.1 also supports native
+OIDC-only or password+OIDC login with explicit subject/group allowlists. OIDC
+terminates at PhotoDrop and issues the same 12-hour local sessions; public pages
+and uploads have no OIDC dependency. Startup never contacts the provider. See
+[protocol, authorization, outage and revocation semantics](oidc.md).
+
+Provider access/refresh/ID tokens and authorization codes are never persisted.
+Migration 011 contains only five-minute transaction hashes and PKCE verifiers.
+All admin mutations retain Origin/CSRF checks. Password rotation revokes sessions
+created through either method. OIDC initiation/callback share separate limits of
+20 requests per minute per client IP and 60 globally (scaled by the existing
+multiplier), two concurrent requests, and a 512-transaction cap. The password
+and guest request budgets remain separate.
+
 ## Optional Turnstile
 
 Set both `PHOTODROP_TURNSTILE_SITE_KEY` and `PHOTODROP_TURNSTILE_SECRET_KEY`, or

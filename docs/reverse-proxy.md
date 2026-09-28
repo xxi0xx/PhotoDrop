@@ -5,6 +5,13 @@ Use HTTPS publicly. PhotoDrop listens HTTP behind trusted infrastructure. Set
 a subpath. It governs links, Origin/Referer checks, Secure cookies and HSTS; it
 does not configure TLS or trust forwarded headers.
 
+For [native OIDC](oidc.md), BASE_URL is required and its fixed callback is
+`/api/admin/oidc/callback`. Preserve that route/query through the proxy but avoid
+logging its query (authorization codes/state). Do not apply Authentik forward-auth
+to PhotoDrop: its guest pages and upload endpoints must remain independent. The
+browser needs the provider authorization endpoint, while PhotoDrop needs discovery,
+token and JWKS access. Existing local sessions make no provider requests.
+
 Restrict port 8080 to the intended proxy. For a host-local proxy, change the
 Compose binding to `127.0.0.1:8080:8080`. For a remote proxy use a private network
 and firewall. Do not cache API/admin/event responses. Pass Origin/Referer unmodified.

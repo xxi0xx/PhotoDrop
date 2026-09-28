@@ -32,6 +32,12 @@ Export streams ready assets to ordinary files/manifest. Immich jobs persist/reco
 in SQLite; Immich remains independent with separate originals/backups. Credentials
 stay in runtime configuration, never frontend bundles or backend identity records.
 
+Native OIDC is optional administrator login only: authorization-code + PKCE with
+lazy discovery and signed ID-token validation, then the same opaque local session
+used by passwords. SQLite holds one-time browser-bound login transactions for five
+minutes, never provider tokens. Subject/group allowlists authorize at login. The
+provider is outside subsequent API/session checks, public pages, uploads and health.
+
 Immich automatic import is an opt-in policy on each event/target binding. The
 existing worker reconciles ready, never-selected assets at startup, periodically,
 and after jobs. Bounded keyset pages visit 32 bindings and select up to 256 assets

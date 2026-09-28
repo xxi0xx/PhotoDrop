@@ -17,6 +17,12 @@ Single-quote dotenv values containing `$` or `#`. Protect the file (`chmod 600 .
 on Linux). Leave `PHOTODROP_BASE_URL` empty for local HTTP. For public use set the
 exact HTTPS origin, such as `https://drop.example.com`, and configure [HTTPS](reverse-proxy.md).
 
+Password authentication remains the default. This development version also supports
+native [OIDC / Authentik](oidc.md): `PHOTODROP_ADMIN_AUTH=oidc` needs no administrator
+password, but requires the public base URL, provider/client configuration and an
+explicit subject/group allowlist. `password+oidc` enables both methods. Configure
+the fixed callback URI in the provider before attempting SSO.
+
 ```sh
 docker compose config --quiet
 docker compose up --build --wait -d

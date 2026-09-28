@@ -97,3 +97,44 @@ func TestSessionLifecycleAndCredentialRotation(t *testing.T) {
 		t.Fatal("old process could establish a session after credential change")
 	}
 }
+
+func TestSessionOnlyAndPasswordRotation(t *testing.T) {
+	db, err := database.Open(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m := NewSessionOnly(db)
+	token, session, err := m.CreateSession(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.Lookup(t.Context(), token); err != nil || !validToken(session.CSRFToken) {
+		t.Fatal(err)
+	}
+	if _, _, err = m.Login(t.Context(), "historical-password", ""); err != ErrUnauthorized {
+		t.Fatal("session-only enabled password")
+	}
+	var count int
+	db.QueryRow("SELECT count(*) FROM admin_credential").Scan(&count)
+	if count != 0 {
+		t.Fatal("OIDC created credential")
+	}
+	p, err := initialize(t.Context(), db, "new-password-for-auth", bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.Lookup(t.Context(), token); err != ErrUnauthorized {
+		t.Fatal("rotation failed to revoke OIDC session")
+	}
+	token, _, err = p.Login(t.Context(), "new-password-for-auth", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = m.Lookup(t.Context(), token); err != nil {
+		t.Fatal("mode switch lost valid local session")
+	}
+	if _, _, err = m.Login(t.Context(), "new-password-for-auth", ""); err != ErrUnauthorized {
+		t.Fatal("historical password enabled")
+	}
+}
