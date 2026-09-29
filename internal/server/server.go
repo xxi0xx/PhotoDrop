@@ -81,6 +81,7 @@ func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS,
 	if cfg.MaxFileSize == 0 {
 		cfg.MaxFileSize = config.DefaultMaxFileSize
 	}
+	uploads.ConfigureFileLimit(cfg.MaxFileSize)
 	app := &application{events: events.New(db), auth: admin, media: uploads, maxFileSize: cfg.MaxFileSize, baseURL: cfg.BaseURL, index: index, logger: logger, security: cfg.Security, limiter: abuse.NewLimiter(10000), challengeSlots: make(chan struct{}, 8), loginSlots: make(chan struct{}, 2)}
 	if cfg.Security.TurnstileSiteKey != "" {
 		app.verifier = verifier

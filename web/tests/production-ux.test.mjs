@@ -58,7 +58,7 @@ test('validation, accessible labels, quota and rate-limit messages stay guest fr
   assert.equal(retryAfterAt('Thu, 01 Jan 1970 00:00:10 GMT',1000),10000);
 });
 
-test('MP4 and MOV selection shares image limits and rejects unsupported formats', () => {
+test('legacy MP4 and MOV selection falls back to the global limit and rejects unsupported formats', () => {
   for (const [name,type] of [['a.mp4','video/mp4'],['a.MOV','video/quicktime'],['a.MOV',''],['a.mp4','application/octet-stream']]) {
     assert.equal(photoProblem({name,type,size:100},100),'');
     assert.match(photoProblem({name,type,size:101},100),/too large/);

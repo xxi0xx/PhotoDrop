@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -113,9 +114,16 @@ func apiError(w http.ResponseWriter, status int, code, message string, fields ma
 }
 
 func (a *application) fail(w http.ResponseWriter, err error) {
+	var quota *media.QuotaError
 	var validation *events.ValidationError
 	var tooLarge *http.MaxBytesError
 	switch {
+	case errors.As(err, &quota):
+		status := 409
+		if quota.File {
+			status = 413
+		}
+		apiError(w, status, quota.Code, quota.Error(), nil)
 	case errors.Is(err, media.ErrContributor):
 		apiError(w, 422, "contributor_name", media.ErrContributor.Error(), map[string]string{"contributor_name": media.ErrContributor.Error()})
 	case errors.Is(err, media.ErrExpired):
@@ -197,6 +205,18 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any, limit int64) bo
 		}
 	}
 	if err != nil {
+		var value *json.UnmarshalTypeError
+		if errors.As(err, &value) {
+			field := value.Field
+			if i := strings.LastIndex(field, "."); i >= 0 {
+				field = field[i+1:]
+			}
+			switch field {
+			case "max_photos", "max_videos", "max_photo_file_bytes", "max_video_file_bytes", "max_photo_storage_bytes", "max_video_storage_bytes":
+				apiError(w, 422, "validation", "Check the event fields", map[string]string{field: "Enter a whole number, or null for no limit"})
+				return false
+			}
+		}
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			apiError(w, 413, "body_too_large", "Request body is too large", nil)
@@ -386,6 +406,10 @@ func (a *application) createEvent(w http.ResponseWriter, r *http.Request, _ auth
 	if !decodeJSON(w, r, &input, 32768) {
 		return
 	}
+	if err := validateFileLimits(input.Input, a.maxFileSize); err != nil {
+		a.fail(w, err)
+		return
+	}
 	var e events.Event
 	var err error
 	if input.Immich == nil {
@@ -409,6 +433,10 @@ func (a *application) createEvent(w http.ResponseWriter, r *http.Request, _ auth
 func (a *application) updateEvent(w http.ResponseWriter, r *http.Request, _ auth.Session) {
 	var input events.Input
 	if !decodeJSON(w, r, &input, 32768) {
+		return
+	}
+	if err := validateFileLimits(input, a.maxFileSize); err != nil {
+		a.fail(w, err)
 		return
 	}
 	e, err := a.events.Update(r.Context(), internalID(r), input)
@@ -474,12 +502,14 @@ func (a *application) publicEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type guestEvent struct {
-		Name        string  `json:"name"`
-		Status      string  `json:"status"`
-		Description string  `json:"description,omitempty"`
-		EventDate   *string `json:"event_date,omitempty"`
-		MaxFileSize int64   `json:"max_file_size,omitempty"`
-		Challenge   *struct {
+		Name             string  `json:"name"`
+		Status           string  `json:"status"`
+		Description      string  `json:"description,omitempty"`
+		EventDate        *string `json:"event_date,omitempty"`
+		MaxFileSize      int64   `json:"max_file_size,omitempty"`
+		MaxPhotoFileSize int64   `json:"max_photo_file_size,omitempty"`
+		MaxVideoFileSize int64   `json:"max_video_file_size,omitempty"`
+		Challenge        *struct {
 			SiteKey string `json:"site_key"`
 			Action  string `json:"action"`
 		} `json:"challenge,omitempty"`
@@ -490,6 +520,8 @@ func (a *application) publicEvent(w http.ResponseWriter, r *http.Request) {
 		guest.Description = e.Description
 		guest.EventDate = e.EventDate
 		guest.MaxFileSize = a.maxFileSize
+		guest.MaxPhotoFileSize = media.EffectiveFileLimit(a.maxFileSize, e.MaxPhotoFileBytes)
+		guest.MaxVideoFileSize = media.EffectiveFileLimit(a.maxFileSize, e.MaxVideoFileBytes)
 		if a.security.TurnstileSiteKey != "" {
 			guest.Challenge = &struct {
 				SiteKey string `json:"site_key"`
@@ -498,4 +530,17 @@ func (a *application) publicEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]any{"event": guest})
+}
+
+func validateFileLimits(input events.Input, ceiling int64) error {
+	fields := map[string]string{}
+	for name, value := range map[string]*int64{"max_photo_file_bytes": input.MaxPhotoFileBytes, "max_video_file_bytes": input.MaxVideoFileBytes} {
+		if value != nil && *value > ceiling {
+			fields[name] = fmt.Sprintf("Cannot exceed the server maximum of %d bytes", ceiling)
+		}
+	}
+	if len(fields) > 0 {
+		return &events.ValidationError{Fields: fields}
+	}
+	return nil
 }

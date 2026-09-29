@@ -47,7 +47,7 @@ func TestPhase2AutoImportUpgrade(t *testing.T) {
 		if err = db.QueryRow("SELECT group_concat(checksum||applied_at) FROM (SELECT checksum,applied_at FROM schema_migrations WHERE version<=9 ORDER BY version)").Scan(&after); err != nil {
 			t.Fatal(err)
 		}
-		if auto || album != "remote-album" || marker != "marker" || before != after || migrationCount(t, db) != 11 {
+		if auto || album != "remote-album" || marker != "marker" || before != after || migrationCount(t, db) != 12 {
 			t.Fatal("upgrade changed existing binding/history")
 		}
 		if _, err = db.Exec("UPDATE immich_event_imports SET auto_import=2"); err == nil {

@@ -40,7 +40,7 @@ func TestPhase3OIDCUpgradePreservesPasswordAndSession(t *testing.T) {
 			t.Fatal(err)
 		}
 		db.QueryRow("SELECT group_concat(checksum||applied_at) FROM (SELECT checksum,applied_at FROM schema_migrations WHERE version<=10 ORDER BY version)").Scan(&after)
-		if hash != "existing-hash" || token != "existing-token-hash" || csrf != "existing-csrf" || after != history || migrationCount(t, db) != 11 {
+		if hash != "existing-hash" || token != "existing-token-hash" || csrf != "existing-csrf" || after != history || migrationCount(t, db) != 12 {
 			t.Fatal("upgrade modified previous auth/history")
 		}
 		var count int

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import Immich from './Immich.svelte';
+  import QuotaEditor from './QuotaEditor.svelte';
+  import { quotaDraft, quotaPayload } from '../lib/quotas';
   import ShareEvent from './ShareEvent.svelte';
   import { onMount, tick } from 'svelte';
   import { request, message, publicURL, localDateTime, formatBytes, APIError, type EventRecord } from '../lib/api';
@@ -7,8 +9,7 @@
   let { id }: { id: string | null } = $props();
   let event = $state<EventRecord | null>(null);
   let name = $state(''); let description = $state(''); let eventDate = $state(''); let enabled = $state(true); let expiration = $state('');
-  let maxPhotos = $state<number | undefined>(); let maxStorageGiB = $state<number | undefined>();
-  let loadedStorageGiB: number | undefined;
+  let quotas = $state(quotaDraft(null));
   let targets = $state<ImmichTargets>({active_target:'',targets:[]});
   let targetError = $state(''); let setupImmich = $state(false); let immichTarget = $state(''); let albumDraft = $state<string | null>(null);
   const newAlbumName = $derived(suggestedAlbum(name, albumDraft));
@@ -21,7 +22,7 @@
   let loading = $state(true); let loadError = $state(''); let busy = $state(false); let error = $state(''); let notice = $state('');
   let fields = $state<Record<string, string>>({}); let confirming = $state(false); let confirmButton = $state<HTMLButtonElement>(); let deleteButton = $state<HTMLButtonElement>();
   async function keepEvent() { confirming = false; await tick(); deleteButton?.focus(); }
-  function apply(saved: EventRecord) { event = saved; name = saved.name; description = saved.description; eventDate = saved.event_date ?? ''; enabled = saved.enabled; expiration = localDateTime(saved.expires_at); maxPhotos = saved.max_assets ?? undefined; loadedStorageGiB = saved.max_bytes == null ? undefined : Number((saved.max_bytes / 1073741824).toFixed(9)); maxStorageGiB = loadedStorageGiB; }
+  function apply(saved: EventRecord) { event = saved; name = saved.name; description = saved.description; eventDate = saved.event_date ?? ''; enabled = saved.enabled; expiration = localDateTime(saved.expires_at); quotas = quotaDraft(saved); }
   async function load() {
     if (!id) { await loadTargets(); loading = false; return; }
     loading = true; loadError = '';
@@ -32,9 +33,7 @@
   async function save(submit: SubmitEvent) {
     submit.preventDefault(); busy = true; error = ''; notice = ''; fields = {};
     try {
-      // Keep exact persisted bytes when the rounded display has not been edited.
-      const maxBytes = maxStorageGiB === loadedStorageGiB && event ? event.max_bytes : maxStorageGiB == null ? null : Math.round(maxStorageGiB * 1073741824);
-      const data = { name, description, event_date: eventDate || null, enabled, expires_at: expiration ? new Date(expiration).toISOString() : null, max_assets: maxPhotos ?? null, max_bytes: maxBytes,
+      const data = { name, description, event_date: eventDate || null, enabled, expires_at: expiration ? new Date(expiration).toISOString() : null, ...quotaPayload(quotas, event),
         ...(!id && setupImmich ? {immich:{target:immichTarget,album_name:newAlbumName,auto_import:autoImport}} : {}) };
       const result = await request<{ event: EventRecord }>(id ? `/api/admin/events/${id}` : '/api/admin/events', id ? 'PUT' : 'POST', data);
       if (!id) { window.location.assign(`/admin/events/${result.event.id}`); return; }
@@ -95,17 +94,13 @@
     {/if}
     {#if event}<ShareEvent url={publicURL(event)} publicID={event.public_id} />{/if}
     <section class="section-card" aria-labelledby="uploads-heading"><h2 id="uploads-heading">Guest uploads</h2>
-      {#if event}<dl class="stat-grid"><div><dt>Files</dt><dd>{event.media.photo_count}{#if event.max_assets !== null}<small> / {event.max_assets}</small>{/if}</dd></div><div><dt>Storage used</dt><dd>{formatBytes(event.media.storage_bytes)}{#if event.max_bytes !== null}<small> / {formatBytes(event.max_bytes)}</small>{/if}</dd></div></dl>
+      {#if event}<dl class="stat-grid"><div><dt>Files</dt><dd>{event.media.ready_count}{#if event.max_assets !== null}<small> / {event.max_assets}</small>{/if}</dd></div><div><dt>Storage used</dt><dd>{formatBytes(event.media.storage_bytes)}{#if event.max_bytes !== null}<small> / {formatBytes(event.max_bytes)}</small>{/if}</dd></div></dl>
         {#if event.media.pending_count}<p class="hint">{event.media.pending_count} pending files reserve {formatBytes(event.media.reserved_bytes ?? 0)}.</p>{/if}
-        {#if !event.media.photo_count}<p class="hint">No files yet. Share the link or QR code to invite your guests.</p>{/if}
-        {#if (event.max_assets !== null && event.media.photo_count + (event.media.pending_count ?? 0) >= event.max_assets) || (event.max_bytes !== null && event.media.storage_bytes + (event.media.reserved_bytes ?? 0) >= event.max_bytes)}<p class="notice" role="status">File or storage limit reached. Existing files are safe. Raise or remove the limit to accept more.</p>{/if}
+        {#if !event.media.ready_count}<p class="hint">No files yet. Share the link or QR code to invite your guests.</p>{/if}
         {#if event.contributors?.length}<h3>Shared by</h3><ul class="contributor-list">{#each event.contributors as contributor}<li><span>{contributor.name ?? 'Anonymous'}</span><strong>{contributor.photo_count} {contributor.photo_count === 1 ? 'file' : 'files'}</strong></li>{/each}</ul><p class="hint">Optional names supplied by guests, not verified identities. Up to 100 names shown.</p>{/if}
         <button type="button" class="text-button" disabled={refreshingStats} onclick={refreshStats}>{refreshingStats ? 'Refreshing…' : 'Refresh file counts'}</button>
       {/if}
-      <fieldset disabled={busy || event?.deleting}>
-        <div class="field"><label for="max-photos">Maximum files</label><input id="max-photos" type="number" min="1" max="1000000" step="1" bind:value={maxPhotos} aria-invalid={!!fields.max_assets} aria-describedby="photos-quota-hint photos-quota-error" /><p id="photos-quota-hint" class="hint">Leave empty for no limit. Completed and pending files both count.</p><div id="photos-quota-error">{#if fields.max_assets}<p class="error">{fields.max_assets}</p>{/if}</div></div>
-        <div class="field"><label for="max-storage">Maximum storage (GiB)</label><input id="max-storage" type="number" min="0.000000001" max="1048576" step="any" bind:value={maxStorageGiB} aria-invalid={!!fields.max_bytes} aria-describedby="storage-quota-hint storage-quota-error" /><p id="storage-quota-hint" class="hint">Leave empty for no limit. 1 GiB = 1,073,741,824 bytes. Lowering limits never deletes files.</p><div id="storage-quota-error">{#if fields.max_bytes}<p class="error">{fields.max_bytes}</p>{/if}</div></div>
-      </fieldset>
+      <QuotaEditor bind:draft={quotas} {event} {fields} disabled={busy || !!event?.deleting} />
     </section>
     <div class="actions save-actions"><button type="submit" disabled={busy || event?.deleting}>{busy ? 'Saving…' : id ? 'Save changes' : 'Create event'}</button><a href="/admin">Cancel</a></div></form>
     {#if event}<Immich eventID={event.id} deleting={event.deleting} />{/if}

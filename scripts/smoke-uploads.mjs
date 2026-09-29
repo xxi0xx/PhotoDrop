@@ -65,7 +65,7 @@ try {
   await send(first, firstSession, 'empty.png', Buffer.alloc(0), 422);
   await send(second, firstSession, 'cross-event.png', png, 404);
   let stats = (await json('GET', `/api/admin/events/${first.id}`, undefined, 200, true)).body.event.media;
-  assert.deepEqual(stats, { photo_count: 2, storage_bytes: png.length * 2 });
+  assert.deepEqual(stats, { photo_count: 2, ready_count: 2, storage_bytes: png.length * 2, photos: {ready_count: 2, bytes: png.length * 2, pending_count: 0, reserved_bytes: 0}, videos: {ready_count: 0, bytes: 0, pending_count: 0, reserved_bytes: 0} });
   await json('PUT', `/api/admin/events/${first.id}`, { name: first.name, enabled: false }, 200, true);
   await send(first, firstSession, 'closed.png', png, 409);
   await json('POST', `/api/public/events/${first.public_id}/upload-sessions`, {}, 409);
@@ -75,7 +75,7 @@ try {
   await runAsync('docker', ['compose', 'up', '--wait', '--wait-timeout', '120', '-d']);
   assert.equal(digest(stored(first, one)), expectedDigest);
   stats = (await json('GET', `/api/admin/events/${first.id}`, undefined, 200, true)).body.event.media;
-  assert.deepEqual(stats, { photo_count: 2, storage_bytes: png.length * 2 });
+  assert.deepEqual(stats, { photo_count: 2, ready_count: 2, storage_bytes: png.length * 2, photos: {ready_count: 2, bytes: png.length * 2, pending_count: 0, reserved_bytes: 0}, videos: {ready_count: 0, bytes: 0, pending_count: 0, reserved_bytes: 0} });
   await json('DELETE', `/api/admin/events/${first.id}`, undefined, 204, true); created.delete(first.id);
   missing(stored(first, one)); missing(stored(first, two));
   assert.equal(digest(stored(second, keep)), expectedDigest);

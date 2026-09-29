@@ -87,7 +87,7 @@ display preserves the original exact byte value. Empty limits are unlimited.
 **Set event quotas when sharing a public link if you need a resource ceiling.**
 Per-session limits alone do not prevent a guest obtaining multiple grants.
 
-Quota usage is ready photo count/actual bytes plus pending count/expected bytes,
+Quota usage is ready file count/actual bytes plus pending count/expected bytes,
 across local, active S3, and all historical backends. Checking capacity and inserting
 the pending row use one IMMEDIATE SQLite transaction. The pending row itself is
 the durable reservation; completion converts it into actual usage without double
@@ -101,6 +101,10 @@ expiry, bounds, and optional verification time. Migrations 001–006 are unchang
 Legacy sessions expire deterministically at the Unix epoch; ready assets remain
 intact. Legacy local pending rows conservatively reserve 1 GiB until cleanup.
 Back up `/data` before upgrading; rolling back to an older binary is unsupported.
+
+## Independent photo/video policy (unreleased v1.1)
+
+Migration 012 adds independent event photo/video count, file-size and storage limits. Each typed pending row reserves its matching bucket in the same IMMEDIATE transaction as overall/session checks. Local classification uses a bounded signature prefix before reservation. Direct S3 class hints are untrusted, cross-checked against MIME and required to match verified signatures at completion; mismatch never transfers quota. Legacy NULL-class pending rows acquire current typed capacity transactionally before becoming ready. Generic session limits and strict Turnstile validation are unchanged. See [full quota rules](quotas.md).
 
 ## Reclamation
 

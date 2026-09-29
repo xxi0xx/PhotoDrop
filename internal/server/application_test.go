@@ -89,6 +89,23 @@ func TestAdminAndGuestWorkflow(t *testing.T) {
 	}
 	check(call("GET", "/admin", "", cookie, "", ""), 200)
 	check(call("GET", "/api/admin/session", "", cookie, "", ""), 200)
+	for _, field := range []string{"max_photos", "max_videos", "max_photo_file_bytes", "max_video_file_bytes", "max_photo_storage_bytes", "max_video_storage_bytes"} {
+		for _, value := range []string{"0", "-1", "1.5", "1125899906842625"} {
+			body := `{"name":"quota","enabled":true,"` + field + `":` + value + `}`
+			response := call("POST", "/api/admin/events", body, cookie, session.CSRFToken, origin)
+			check(response, 422)
+			if !strings.Contains(response.Body.String(), `"`+field+`":`) {
+				t.Fatal("missing field error", response.Body.String())
+			}
+		}
+	}
+	for _, field := range []string{"max_photo_file_bytes", "max_video_file_bytes"} {
+		response := call("POST", "/api/admin/events", `{"name":"quota","enabled":true,"`+field+`":`+strconv.FormatInt(config.DefaultMaxFileSize+1, 10)+`}`, cookie, session.CSRFToken, origin)
+		check(response, 422)
+		if !strings.Contains(response.Body.String(), field) {
+			t.Fatal("missing server ceiling field error")
+		}
+	}
 	valid := `{"name":"  Wedding <script>alert(1)</script>  ","description":"Welcome ' OR 1=1; --","event_date":"2026-09-04","enabled":true,"expires_at":null}`
 	for _, badCSRF := range []string{"", "wrong"} {
 		check(call("POST", "/api/admin/events", valid, cookie, badCSRF, origin), 403)
@@ -134,10 +151,18 @@ func TestAdminAndGuestWorkflow(t *testing.T) {
 	if public.Event["status"] != "open" || public.Event["name"] != e.Name {
 		t.Fatal("open guest event not returned")
 	}
-	for _, field := range []string{"id", "public_id", "enabled", "expires_at", "created_at", "updated_at", "csrf_token", "public_url"} {
+	for _, field := range []string{"id", "public_id", "enabled", "expires_at", "created_at", "updated_at", "csrf_token", "public_url", "media", "photos", "videos", "max_photos", "max_videos"} {
 		if _, ok := public.Event[field]; ok {
 			t.Fatalf("public response exposes %s", field)
 		}
+	}
+	typed := `{"name":"Typed limits","enabled":true,"max_photos":1,"max_videos":2,"max_photo_file_bytes":1234567,"max_video_file_bytes":2345678,"max_photo_storage_bytes":987654321,"max_video_storage_bytes":876543210}`
+	check(call("PUT", path, typed, cookie, session.CSRFToken, origin), 200)
+	publicResponse := call("GET", "/api/public/events/"+e.PublicID, "", nil, "", "")
+	check(publicResponse, 200)
+	json.Unmarshal(publicResponse.Body.Bytes(), &public)
+	if public.Event["max_photo_file_size"] != float64(1234567) || public.Event["max_video_file_size"] != float64(2345678) || public.Event["max_file_size"] != float64(config.DefaultMaxFileSize) {
+		t.Fatal(public.Event)
 	}
 	for _, update := range []string{`{"name":"Closed wedding","description":"private while closed","enabled":false}`, `{"name":"Closed wedding","enabled":true,"expires_at":"2000-01-01T00:00:00Z"}`} {
 		w = call("PUT", path, update, cookie, session.CSRFToken, origin)

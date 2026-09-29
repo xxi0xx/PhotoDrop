@@ -58,7 +58,7 @@ try {
     assert.equal((await complete(event, sid, a)).id, a.asset.id);
     const b = await prepare(event, sid); assert.equal(new URL(b.upload.url).port, '18091'); await put(b); await complete(event, sid, b);
     await restart('local-default', missing ? 's3-b' : 's3-a,s3-b');
-    assert.deepEqual((await json('GET', `/api/admin/events/${event.id}`, undefined, 200, true)).body.event.media, { photo_count: 3, storage_bytes: png.length * 3 });
+    assert.deepEqual((await json('GET', `/api/admin/events/${event.id}`, undefined, 200, true)).body.event.media, { photo_count: 3, ready_count: 3, storage_bytes: png.length * 3, photos: {ready_count: 3, bytes: png.length * 3, pending_count: 0, reserved_bytes: 0}, videos: {ready_count: 0, bytes: 0, pending_count: 0, reserved_bytes: 0} });
     if (missing) {
       await json('DELETE', `/api/admin/events/${event.id}`, undefined, 500, true);
       assert.equal((await json('GET', '/healthz')).body.status, 'ok');

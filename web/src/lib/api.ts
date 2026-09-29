@@ -1,15 +1,17 @@
 import { retryAfterAt } from './upload-ux';
 export type Session = { csrf_token: string; expires_at: string };
+export type TypeStats = { ready_count: number; bytes: number; pending_count: number; reserved_bytes: number };
 export type EventRecord = {
   id: number; public_id: string; name: string; description: string;
   event_date: string | null; enabled: boolean; expires_at: string | null;
   created_at: string; updated_at: string; status: 'open' | 'disabled' | 'expired'; public_url: string;
   deleting: boolean; max_assets: number | null; max_bytes: number | null;
-  media: { photo_count: number; storage_bytes: number; pending_count?: number; reserved_bytes?: number };
+  max_photos: number | null; max_videos: number | null; max_photo_file_bytes: number | null; max_video_file_bytes: number | null; max_photo_storage_bytes: number | null; max_video_storage_bytes: number | null;
+  media: { photos: TypeStats; videos: TypeStats; ready_count: number; photo_count: number; storage_bytes: number; pending_count?: number; reserved_bytes?: number };
   contributors?: { name: string | null; photo_count: number }[];
 };
 export type Challenge = { site_key: string; action: string };
-export type GuestEvent = { name: string; status: 'open' | 'closed'; description?: string; event_date?: string; max_file_size?: number; challenge?: Challenge };
+export type GuestEvent = { name: string; status: 'open' | 'closed'; description?: string; event_date?: string; max_file_size?: number; max_photo_file_size?: number; max_video_file_size?: number; challenge?: Challenge };
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;

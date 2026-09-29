@@ -51,3 +51,7 @@ and old image, verify, then switch traffic. Schema rollback cannot undo remote d
 Prefer a full version or digest for controlled upgrades. Blindly tracking latest
 is not an upgrade policy. Commit SHAs identify source; separate sha-* image tags
 are not published. Registry administrators can delete/retag artifacts; record digests.
+
+## Phase 4.5 event quotas
+
+Migration 012 adds six nullable event limits and nullable asset `media_class`; migrations 001–011 are unchanged. Old overall `max_assets`/`max_bytes` are preserved and no limits are split or inferred. Supported ready MIME and pending expected MIME backfill photo/video; ambiguous pending rows stay NULL and must acquire current typed capacity at completion. New limits take effect when explicitly edited. Stop and back up before upgrading; restore the pre-upgrade backup and old image for rollback. See [quota semantics](quotas.md).
