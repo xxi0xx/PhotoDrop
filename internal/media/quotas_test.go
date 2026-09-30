@@ -10,6 +10,7 @@ import (
 	"photodrop/internal/events"
 	"photodrop/internal/storage"
 	"photodrop/internal/testutil"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -47,7 +48,7 @@ func TestCleanupExpiredGrantsAndAttemptsPreservesReadyRecovery(t *testing.T) {
 		}
 	}
 	for _, grant := range []Session{empty, pendingGrant} {
-		_, err := s.Prepare(ctx, e.PublicID, grant.ID, Preparation{"new.png", int64(len(data)), "image/png", randomID()}, 1024)
+		_, err := s.Prepare(ctx, e.PublicID, grant.ID, Preparation{"new.png", int64(len(data)), "image/png", randomID(), ""}, 1024*1024)
 		if !errors.Is(err, ErrSession) {
 			t.Fatalf("removed grant: %v", err)
 		}
@@ -104,12 +105,24 @@ func TestCleanupUnavailableBackendsDoNotStarveLaterReservations(t *testing.T) {
 }
 
 func TestAtomicEventAndSessionReservationsAcrossConnections(t *testing.T) {
-	for _, scope := range []string{"event files", "event bytes", "session files", "session bytes"} {
+	for _, scope := range []string{"event files", "event bytes", "session files", "session bytes", "photo files", "photo bytes", "video files", "video bytes"} {
 		t.Run(scope, func(t *testing.T) {
 			s, dir, e, session, _, remote := directFixture(t)
-			data := testutil.Images()["image/png"]
+			kind := "image/png"
+			if strings.HasPrefix(scope, "video") {
+				kind = "video/mp4"
+			}
+			data := testutil.Media()[kind]
 			size := int64(len(data))
 			switch scope {
+			case "photo files":
+				s.db.Exec("UPDATE events SET max_photos=10 WHERE id=?", e.ID)
+			case "video files":
+				s.db.Exec("UPDATE events SET max_videos=10 WHERE id=?", e.ID)
+			case "photo bytes":
+				s.db.Exec("UPDATE events SET max_photo_storage_bytes=? WHERE id=?", 10*size, e.ID)
+			case "video bytes":
+				s.db.Exec("UPDATE events SET max_video_storage_bytes=? WHERE id=?", 10*size, e.ID)
 			case "event files":
 				s.db.Exec("UPDATE events SET max_assets=10 WHERE id=?", e.ID)
 			case "event bytes":
@@ -122,7 +135,9 @@ func TestAtomicEventAndSessionReservationsAcrossConnections(t *testing.T) {
 			// Mixed local-ready usage and remote pending reservations share one allowance.
 			configureDirect(t, s, remote, false)
 			for range 9 {
-				upload(t, s, e, session, "local.png")
+				if _, err := s.Upload(t.Context(), e.PublicID, session.ID, "local.bin", kind, bytes.NewReader(data), size, 1024*1024); err != nil {
+					t.Fatal(err)
+				}
 			}
 			configureDirect(t, s, remote, true)
 			otherDB, err := database.Open(t.Context(), dir)
@@ -146,7 +161,7 @@ func TestAtomicEventAndSessionReservationsAcrossConnections(t *testing.T) {
 				}
 				wg.Go(func() {
 					<-start
-					_, err := svc.Prepare(t.Context(), e.PublicID, session.ID, Preparation{"photo.png", size, "image/png", randomID()}, 1024)
+					_, err := svc.Prepare(t.Context(), e.PublicID, session.ID, Preparation{"file.bin", size, kind, randomID(), ""}, 1024*1024)
 					if err == nil {
 						passed.Add(1)
 					} else if errors.Is(err, ErrEventQuota) || errors.Is(err, ErrSessionQuota) {
@@ -180,7 +195,7 @@ func TestQuotaLowerRaiseReleaseAndExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := prepare(t, s, e, session, "image/png", data)
-	if _, err := s.Prepare(t.Context(), e.PublicID, session.ID, Preparation{"next.png", size, "image/png", randomID()}, 1024); !errors.Is(err, ErrEventQuota) {
+	if _, err := s.Prepare(t.Context(), e.PublicID, session.ID, Preparation{"next.png", size, "image/png", randomID(), ""}, 1024*1024); !errors.Is(err, ErrEventQuota) {
 		t.Fatal("pending reservation ignored", err)
 	}
 	s.db.Exec("UPDATE assets SET created_at='2000-01-01T00:00:00Z',authorized_until='2000-01-01T00:00:00Z' WHERE id=?", pending.Asset.ID)
@@ -199,7 +214,7 @@ func TestQuotaLowerRaiseReleaseAndExpiry(t *testing.T) {
 	if countAssets(t, s, "ready") != 2 {
 		t.Fatal("quota lowering deleted media")
 	}
-	if _, err := s.Prepare(t.Context(), e.PublicID, session.ID, Preparation{"over.png", size, "image/png", randomID()}, 1024); !errors.Is(err, ErrEventQuota) {
+	if _, err := s.Prepare(t.Context(), e.PublicID, session.ID, Preparation{"over.png", size, "image/png", randomID(), ""}, 1024*1024); !errors.Is(err, ErrEventQuota) {
 		t.Fatal(err)
 	}
 	if _, err := s.events.Update(t.Context(), e.ID, events.Input{Name: e.Name, Enabled: &enabled}); err != nil {
@@ -208,7 +223,7 @@ func TestQuotaLowerRaiseReleaseAndExpiry(t *testing.T) {
 	inflight := prepare(t, s, e, session, "image/png", data)
 	put(t, inflight, data)
 	s.db.Exec("UPDATE upload_sessions SET expires_at='2000-01-01T00:00:00Z' WHERE id=?", session.ID)
-	if _, err := s.Prepare(t.Context(), e.PublicID, session.ID, Preparation{"expired.png", size, "image/png", randomID()}, 1024); !errors.Is(err, ErrExpired) {
+	if _, err := s.Prepare(t.Context(), e.PublicID, session.ID, Preparation{"expired.png", size, "image/png", randomID(), ""}, 1024*1024); !errors.Is(err, ErrExpired) {
 		t.Fatal("expired prepare", err)
 	}
 	if _, err := s.Authorize(t.Context(), e.PublicID, session.ID, inflight.Asset.ID); !errors.Is(err, ErrExpired) {

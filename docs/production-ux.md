@@ -79,3 +79,7 @@ independent Immich copies. There is no public gallery or browser ZIP export.
 Migration `009_contributors.sql` adds nullable names to upload sessions/assets.
 Migrations 001–008 are unchanged. Normal deployment still uses one PhotoDrop
 container plus `/data`, with optional external storage/Immich configured as before.
+
+## Independent photo/video limits (unreleased v1.1)
+
+Guest uploads in the event editor has separate Photo limits and Video limits panels with ready/pending counts, storage, and individual-file limits. Overall ceilings are secondary. Blank means unlimited at that scope; unchanged MiB/GiB displays preserve exact byte values. Typed limit notices include pending reservations. Guests receive effective typed file limits for preflight, without private usage counts. See [event quotas](quotas.md).

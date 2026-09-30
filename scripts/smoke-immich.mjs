@@ -220,7 +220,10 @@ autoState=await send(automaticEvent,'retry');assert.equal(autoState.imported,21)
 await control({fail_validate:true});
 const guestStarted=Date.now();await upload(automaticEvent);
 assert.ok(Date.now()-guestStarted<2000,'guest completion waited for Immich');await json('GET','/healthz');
-autoState=await waitFor(automaticEvent,s=>s.job.status==='failed');
+// Status reads progress and the latest job separately; a completion between
+// those reads can briefly pair old counts with a terminal job. Wait for both
+// invariants rather than accepting the first terminal-job snapshot.
+autoState=await waitFor(automaticEvent,s=>s.job.status==='failed'&&s.failed===1&&s.pending===0);
 assert.equal(autoState.failed,1);assert.equal(autoState.pending,0);
 await control({});autoState=await send(automaticEvent,'retry');assert.equal(autoState.imported,22);
 await json('DELETE',`/api/admin/events/${automaticEvent.id}`,undefined,204);

@@ -77,3 +77,7 @@ start a fresh OIDC sign-in rather than trying to reuse a callback from an old
 browser tab. Preserve private client/issuer/allowlist configuration separately.
 Existing PhotoDrop sessions can survive restore until their original expiry;
 revocation guidance is in [OIDC authentication](oidc.md).
+
+## Typed quota state (unreleased v1.1)
+
+A stopped whole-data backup includes event limits, asset media classes and pending reservations; no separate quota ledger exists. Migration 012 leaves old overall limits intact and new limits unlimited. Keep external S3 objects and historical backend configuration alongside the database backup responsibility. The disposable release smoke upgrades exact Phase 4 data containing photos/videos, pending media, attribution, quotas, backend and Immich records, then restores a stopped upgraded backup and checks identity and exported byte hashes. See [quota upgrade semantics](quotas.md).

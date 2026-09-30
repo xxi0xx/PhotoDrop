@@ -206,3 +206,7 @@ backend identity and Gate 4 upgrade instructions](storage-backends.md).
 Use one PhotoDrop instance per data directory. Keep backups of `/data`, and use
 your provider's backup/versioning policy for remote media; a SQLite backup alone
 does not back up S3 objects.
+
+## Per-media admission limits
+
+Photo/video limits apply identically to local, direct S3 and historical backend assets. Local signature classification precedes reservation; direct prepare accepts an untrusted `media_class` hint, cross-checks declared MIME and final signatures, and cannot transfer a reservation between buckets. Blank/octet-stream local declarations can be sniffed, but direct preparation needs an explicit class when MIME is ambiguous. See [quota fields, recovery and cleanup](quotas.md).

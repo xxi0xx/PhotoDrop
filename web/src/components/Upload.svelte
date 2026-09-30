@@ -4,8 +4,8 @@
   import Turnstile from './Turnstile.svelte';
   import { UploadBatch, type Grant } from '../lib/upload-batch.svelte';
   import { runDirect, recoverUploadGrant, type UploadPlan, type Prepared, type DirectAttempt } from '../lib/direct-upload';
-  import { photoProblem, photoStatus, guestError, retryAfterAt, selectedForUpload, type PhotoState } from '../lib/upload-ux';
-  let { publicID, maxFileSize, challenge }: { publicID: string; maxFileSize: number; challenge?: Challenge } = $props();
+  import { directClass, photoProblem, photoStatus, guestError, retryAfterAt, selectedForUpload, type PhotoState } from '../lib/upload-ux';
+  let { publicID, maxFileSize, maxPhotoFileSize = maxFileSize, maxVideoFileSize = maxFileSize, challenge }: { publicID: string; maxFileSize: number; maxPhotoFileSize?: number; maxVideoFileSize?: number; challenge?: Challenge } = $props();
   type Item = { file: File; status: PhotoState; sent: number; error: string; validationError: string; attempt: DirectAttempt; grant?: Grant; batch: UploadBatch };
   const batchLimit = 100, concurrency = 3;
   let items = $state<Item[]>([]);
@@ -31,7 +31,7 @@
     if (files.length > batchLimit) { error = `Choose up to ${batchLimit} files at a time.`; return; }
     const batch = new UploadBatch();
     const selected: Item[] = files.map(file => {
-      const problem = photoProblem(file, maxFileSize);
+      const problem = photoProblem(file, maxFileSize, maxPhotoFileSize, maxVideoFileSize);
       return { file, batch, status: problem ? 'failed' : 'waiting', sent: 0, error: problem, validationError: problem,
         attempt: { requestID: Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2,'0')).join('') } };
     });
@@ -110,9 +110,10 @@
             item.grant ??= await getGrant(item.batch);
             if (canceled) throw new Error('Upload canceled. You can retry this file.');
             if (item.grant.strategy === 'direct') {
+              const mediaClass = directClass(item.file.type);
               const base = `/api/public/events/${encodeURIComponent(publicID)}/upload-sessions/${item.grant.id}/assets`;
               await runDirect(item.attempt, {
-                prepare: () => { checkRate(); return request<Prepared>(`${base}/prepare`, 'POST', { filename: item.file.name, size: item.file.size, content_type: item.file.type || 'application/octet-stream', request_id: item.attempt.requestID }); },
+                prepare: () => { checkRate(); return request<Prepared>(`${base}/prepare`, 'POST', { filename: item.file.name, size: item.file.size, content_type: item.file.type || 'application/octet-stream', request_id: item.attempt.requestID, media_class: mediaClass }); },
                 authorize: id => { checkRate(); return request<Prepared>(`${base}/${id}/authorize`, 'POST', {}); },
                 complete: id => { checkRate(); return request(`${base}/${id}/complete`, 'POST', {}); },
                 put: plan => { item.sent = 0; return transfer(item,plan); },
@@ -157,7 +158,7 @@
       <div class="field"><label for="contributor-name">Your name <span class="muted">(optional)</span></label><input id="contributor-name" autocomplete="off" bind:value={contributorName} bind:this={nameInput} disabled={busy} aria-invalid={!!nameError} aria-describedby={nameError ? 'contributor-hint contributor-error' : 'contributor-hint'} />
         <p id="contributor-hint" class="hint">Only the host sees this name with your files. No account needed. Up to 100 characters.</p>{#if nameError}<p id="contributor-error" class="error">{nameError}</p>{/if}</div>
       <label for="photos">Choose files</label><input id="photos" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,video/mp4,video/quicktime,.heic,.heif,.mp4,.mov" multiple disabled={busy} bind:this={input} onchange={choose} aria-describedby="batch-hint selection-error" />
-      <p id="batch-hint" class="hint">JPEG, PNG, WebP, GIF, HEIC, HEIF, MP4 or MOV. Up to {batchLimit} files at a time, {formatBytes(maxFileSize)} each.</p>
+      <p id="batch-hint" class="hint">JPEG, PNG, WebP, GIF, HEIC, HEIF, MP4 or MOV. Up to {batchLimit} files at a time, photos up to {formatBytes(maxPhotoFileSize)}, videos up to {formatBytes(maxVideoFileSize)} each.</p>
     {/if}
     <div id="selection-error">{#if error}<p class="error" role="alert">{error}</p>{/if}</div>
     {#if items.length}

@@ -28,13 +28,17 @@ type Service struct {
 	backends                   *storage.Backends
 	assetLocks                 [64]sync.Mutex
 	security                   config.Security
+	fileCeiling                int64
 	cleanupMu                  sync.Mutex
 	cleanupAfter, retiredAfter string
 }
 
 func New(db *sql.DB, objects storage.Store, logger *slog.Logger) *Service {
-	return &Service{db: db, events: events.New(db), storage: objects, logger: logger, backends: storage.LocalBackends(), security: config.Security{}.Defaults()}
+	return &Service{db: db, events: events.New(db), storage: objects, logger: logger, backends: storage.LocalBackends(), security: config.Security{}.Defaults(), fileCeiling: config.DefaultMaxFileSize}
 }
+
+// ConfigureFileLimit sets the server ceiling before cleanup or requests.
+func (s *Service) ConfigureFileLimit(limit int64) { s.fileCeiling = limit }
 
 // ConfigureBackends is called once during startup, before cleanup or requests.
 func (s *Service) ConfigureBackends(backends *storage.Backends) { s.backends = backends }
@@ -174,6 +178,21 @@ func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, dec
 	lock := s.lock(e.ID)
 	lock.RLock()
 	defer lock.RUnlock()
+	// Read only the classification prefix before reserving; SQL/network streaming
+	// remain separate. Final EOF-aware sniffing below still validates exact 512 B.
+	var prefix [512]byte
+	n, err := io.ReadFull(io.LimitReader(source, limit+1), prefix[:])
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return Asset{}, fmt.Errorf("read upload header: %w", err)
+	}
+	if int64(n) > limit {
+		return Asset{}, storage.ErrTooLarge
+	}
+	kind, err := Sniff(prefix[:n], -1)
+	if err != nil {
+		return Asset{}, err
+	}
+	class := Class(kind)
 	id, now := randomID(), timestamp()
 	key := objectKey(e.ID, id)
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -188,15 +207,22 @@ func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, dec
 	if err != nil {
 		return Asset{}, err
 	}
+	limit, err = fileLimit(ctx, tx, e.ID, class, limit)
+	if err != nil {
+		return Asset{}, err
+	}
+	if claimedSize > limit || int64(n) > limit {
+		return Asset{}, fileQuota(class)
+	}
 	expected := claimedSize
 	if expected < 0 {
 		expected = limit
 	}
-	if err := reserve(ctx, tx, e.ID, sessionID, expected, q); err != nil {
+	if err := reserve(ctx, tx, e.ID, sessionID, expected, q, class); err != nil {
 		return Asset{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO assets(id, event_id, upload_session_id, original_filename, storage_key, status, created_at, storage_backend_id, expected_size_bytes, contributor_name)
-		VALUES (?, ?, ?, ?, ?, 'pending', ?, 1, ?, ?)`, id, e.ID, sessionID, filename, key, now, expected, q.contributor); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO assets(id, event_id, upload_session_id, original_filename, storage_key, status, created_at, storage_backend_id, expected_size_bytes, contributor_name, media_class)
+		VALUES (?, ?, ?, ?, ?, 'pending', ?, 1, ?, ?, ?)`, id, e.ID, sessionID, filename, key, now, expected, q.contributor, class); err != nil {
 		return Asset{}, fmt.Errorf("create pending asset: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -215,24 +241,15 @@ func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, dec
 			}
 		}
 	}()
-	bounded := io.LimitReader(source, expected+1)
-	var prefix [512]byte
-	n, err := io.ReadFull(bounded, prefix[:])
-	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-		return Asset{}, fmt.Errorf("read upload header: %w", err)
-	}
-	if int64(n) > limit {
-		return Asset{}, storage.ErrTooLarge
-	}
 	if int64(n) > expected {
 		return Asset{}, ErrSize
 	}
-	kind, err := Sniff(prefix[:n], -1)
-	if err != nil {
-		return Asset{}, err
-	}
+	bounded := io.LimitReader(source, expected-int64(n)+1)
 	object, err := s.storage.Put(ctx, key, io.MultiReader(bytes.NewReader(prefix[:n]), bounded), expected)
 	if err != nil {
+		if errors.Is(err, storage.ErrTooLarge) && expected == limit {
+			return Asset{}, fileQuota(class)
+		}
 		return Asset{}, err
 	}
 	if object.Size <= 0 || object.Size > limit || (claimedSize >= 0 && object.Size != claimedSize) {
@@ -272,15 +289,24 @@ func (s *Service) Upload(ctx context.Context, publicID, sessionID, filename, dec
 	return Asset{ID: id, Filename: filename, MIMEType: kind, Size: object.Size, Status: "ready"}, nil
 }
 
+type TypeStats struct {
+	ReadyCount    int64 `json:"ready_count"`
+	Bytes         int64 `json:"bytes"`
+	PendingCount  int64 `json:"pending_count"`
+	ReservedBytes int64 `json:"reserved_bytes"`
+}
 type Stats struct {
-	PhotoCount    int64 `json:"photo_count"`
-	StorageBytes  int64 `json:"storage_bytes"`
-	PendingCount  int64 `json:"pending_count,omitempty"`
-	ReservedBytes int64 `json:"reserved_bytes,omitempty"`
+	PhotoCount    int64     `json:"photo_count"` // Legacy generic ready-file count; retain meaning.
+	ReadyCount    int64     `json:"ready_count"`
+	StorageBytes  int64     `json:"storage_bytes"`
+	PendingCount  int64     `json:"pending_count,omitempty"`
+	ReservedBytes int64     `json:"reserved_bytes,omitempty"`
+	Photos        TypeStats `json:"photos"`
+	Videos        TypeStats `json:"videos"`
 }
 
 func (s *Service) Stats(ctx context.Context) (map[int64]Stats, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT event_id, SUM(status='ready'), COALESCE(SUM(CASE WHEN status='ready' THEN size_bytes ELSE 0 END),0), SUM(status='pending'), COALESCE(SUM(CASE WHEN status='pending' THEN expected_size_bytes ELSE 0 END),0) FROM assets GROUP BY event_id")
+	rows, err := s.db.QueryContext(ctx, `SELECT event_id,media_class,SUM(status='ready'),COALESCE(SUM(CASE WHEN status='ready' THEN size_bytes ELSE 0 END),0),SUM(status='pending'),COALESCE(SUM(CASE WHEN status='pending' THEN expected_size_bytes ELSE 0 END),0) FROM assets GROUP BY event_id,media_class`)
 	if err != nil {
 		return nil, fmt.Errorf("read media statistics: %w", err)
 	}
@@ -288,9 +314,24 @@ func (s *Service) Stats(ctx context.Context) (map[int64]Stats, error) {
 	result := map[int64]Stats{}
 	for rows.Next() {
 		var id int64
-		var stats Stats
-		if err := rows.Scan(&id, &stats.PhotoCount, &stats.StorageBytes, &stats.PendingCount, &stats.ReservedBytes); err != nil {
+		var class *string
+		var typed TypeStats
+		if err := rows.Scan(&id, &class, &typed.ReadyCount, &typed.Bytes, &typed.PendingCount, &typed.ReservedBytes); err != nil {
 			return nil, err
+		}
+		stats := result[id]
+		stats.PhotoCount += typed.ReadyCount
+		stats.ReadyCount += typed.ReadyCount
+		stats.StorageBytes += typed.Bytes
+		stats.PendingCount += typed.PendingCount
+		stats.ReservedBytes += typed.ReservedBytes
+		if class != nil {
+			if *class == "photo" {
+				stats.Photos = typed
+			}
+			if *class == "video" {
+				stats.Videos = typed
+			}
 		}
 		result[id] = stats
 	}

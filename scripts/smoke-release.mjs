@@ -6,14 +6,15 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { photo } from './photo-fixture.mjs';
+import { video } from './video-fixture.mjs';
 
-const baseline = process.argv.includes('--gate7') ? '6b7d046' : 'e5a97e49bdadb740389f01cade7a88065eb57f70'; // Immutable Phase 3 (or older Gate 7) baseline.
+const baseline = process.argv.includes('--gate7') ? '6b7d046' : '95fbffa29d26b45e2e53f92b2128e4c231a860af'; // Immutable Phase 4 (or older Gate 7) baseline.
 const id = `photodrop-release-${randomBytes(5).toString('hex')}`;
 const dir = mkdtempSync(join(tmpdir(), id));
 const oldImage = `${id}:baseline`, image = `${id}:candidate`, toolsImage = `${id}:tools`;
 const objects = `${id}-objects`, app = `${id}-app`;
-const volumes = ['data', 'backup', 'restored'].map(x => `${id}-${x}`);
-const [data, backup, restored] = volumes;
+const volumes = ['data', 'backup', 'restored', 'upgraded-backup'].map(x => `${id}-${x}`);
+const [data, backup, restored, upgradedBackup] = volumes;
 const base = 'http://localhost:8084', password = randomBytes(24).toString('hex');
 let cookie = '', csrf = '', running = false;
 const docker = (args, options = {}) => execFileSync('docker', args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 20 * 1024 * 1024, ...options });
@@ -66,21 +67,21 @@ async function session(event) {
   return (await call('POST', `/api/public/events/${event.public_id}/upload-sessions`, { contributor_name: 'Release María 王' }, 201, false)).body.upload_session.id;
 }
 const path = (event, sid) => `/api/public/events/${event.public_id}/upload-sessions/${sid}/assets`;
-async function prepare(event, sid, bytes) {
-  return (await call('POST', path(event, sid) + '/prepare', { filename: 'remote.png', content_type: 'image/png', size: bytes.length, request_id: randomBytes(16).toString('hex') }, 201, false)).body;
+async function prepare(event, sid, bytes, kind = 'image/png') {
+  return (await call('POST', path(event, sid) + '/prepare', { filename: 'remote.png', content_type: kind, size: bytes.length, request_id: randomBytes(16).toString('hex') }, 201, false)).body;
 }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 
 try {
   const oldMigrations = execFileSync('git', ['ls-tree','-r','--name-only',baseline,'--','migrations'],{encoding:'utf8'}).trim().split('\n').filter(path=>path.endsWith('.sql'));
-  assert.equal(oldMigrations.length,process.argv.includes('--gate7')?9:10);
+  assert.equal(oldMigrations.length,process.argv.includes('--gate7')?9:11);
   execFileSync('git', ['diff', '--exit-code', baseline, '--', ...oldMigrations]);
   const archive = join(dir, 'baseline.tar');
   execFileSync('git', ['archive', '--format=tar', '-o', archive, baseline]);
   console.log(`Building exact baseline ${baseline} and release candidate (no publishing).`);
   docker(['build', '-t', oldImage, '-'], { input: readFileSync(archive), stdio: ['pipe', 'inherit', 'inherit'] });
   const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  docker(['build', '--build-arg', 'VERSION=1.0.0-rc.test', '--build-arg', `REVISION=${revision}`, '-t', image, '.'], { stdio: 'inherit' });
+  docker(['build', '--build-arg', 'VERSION=1.1.0-dev.quotas', '--build-arg', `REVISION=${revision}`, '-t', image, '.'], { stdio: 'inherit' });
   docker(['build', '--target', 'backend', '-t', toolsImage, '.'], { stdio: 'inherit' });
   // Helpers are compiled only into a disposable test image, never runtime.
   docker(['run', '--name', `${id}-compile`, toolsImage, 'sh', '-ec', 'go build -o /tmp/s3test ./scripts/s3test && go build -o /tmp/releasestate ./scripts/releasestate']);
@@ -93,37 +94,59 @@ try {
   const localBytes = photo(), sid = await session(event);
   const localResponse = await fetch(base + path(event, sid), { method: 'POST', headers: { Origin: base, 'Content-Type': 'image/png', 'Content-Disposition': 'attachment; filename=local.png' }, body: localBytes });
   assert.equal(localResponse.status, 201); const local = (await localResponse.json()).asset;
+  const videoBytes = video();
+  let localVideo;
+  if (oldMigrations.length >= 10) {
+    const response = await fetch(base + path(event, sid), {method:'POST', headers:{Origin:base,'Content-Type':'video/mp4','Content-Disposition':'attachment; filename=local.mp4'},body:videoBytes});
+    assert.equal(response.status,201); localVideo=(await response.json()).asset;
+  }
   stop(); await start(oldImage, data, 's3');
   const remoteBytes = photo(), remoteSession = await session(event), remote = await prepare(event, remoteSession, remoteBytes);
   assert.equal((await fetch(remote.upload.url, { method: 'PUT', headers: remote.upload.headers, body: remoteBytes })).status, 200);
   await call('POST', path(event, remoteSession) + `/${remote.asset.id}/complete`, {}, 200, false);
   await prepare(event, remoteSession, photo()); // Preserve one legitimate pending reservation.
+  if (localVideo) {
+    await prepare(event, remoteSession, videoBytes, 'video/mp4');
+    await prepare(event, remoteSession, photo(), 'application/octet-stream');
+  }
   const publicBefore = (await call('GET', `/api/public/events/${event.public_id}`, undefined, 200, false)).body;
   const detailBefore = (await call('GET', `/api/admin/events/${event.id}`)).body;
-  assert.equal(detailBefore.event.media.photo_count, 2);
+  assert.equal(detailBefore.event.media.photo_count, localVideo ? 3 : 2);
   stop(); const before = state('seed', data);
-  assert.equal(before.assets.filter(a => a.status === 'pending').length, 1);
+  assert.equal(before.assets.filter(a => a.status === 'pending').length, localVideo ? 3 : 1);
   assert.equal(before.schema_migrations.length, oldMigrations.length);
   copyVolume(data, backup);
   const backedUpSession = {cookie, csrf};
   for (const [label, volume] of [['upgrade', data], ['restore', restored]]) {
     if (label === 'restore') {
       // Actually destroy the disposable upgraded volume, then restore backup to an empty volume.
-      docker(['volume', 'rm', data]); copyVolume(backup, restored);
+      docker(['volume', 'rm', data]); copyVolume(upgradedBackup, restored);
     }
     await start(image, volume);
     ({cookie, csrf} = backedUpSession);
     // Existing cookie survives; then verify a fresh sign-in too.
     await call('GET', '/api/admin/session'); await login();
-    assert.deepEqual((await call('GET', `/api/admin/events/${event.id}`)).body, detailBefore);
-    assert.deepEqual((await call('GET', `/api/public/events/${event.public_id}`, undefined, 200, false)).body, publicBefore);
+    const detailAfter=(await call('GET', `/api/admin/events/${event.id}`)).body;
+    const oldDetail=structuredClone(detailAfter);
+    const typedFields=['max_photos','max_videos','max_photo_file_bytes','max_video_file_bytes','max_photo_storage_bytes','max_video_storage_bytes'];
+    for(const field of typedFields){assert.equal(oldDetail.event[field],null);delete oldDetail.event[field];}
+    assert.equal(oldDetail.event.media.photos.ready_count,2);
+    assert.equal(oldDetail.event.media.videos.ready_count,localVideo?1:0);
+    assert.equal(oldDetail.event.media.photos.pending_count,1);
+    assert.equal(oldDetail.event.media.videos.pending_count,localVideo?1:0);
+    assert.equal(oldDetail.event.media.ready_count,localVideo?3:2);
+    delete oldDetail.event.media.photos;delete oldDetail.event.media.videos;delete oldDetail.event.media.ready_count;
+    assert.deepEqual(oldDetail,detailBefore);
+    const publicAfter=(await call('GET', `/api/public/events/${event.public_id}`, undefined, 200, false)).body;
+    for(const key of ['max_photo_file_size','max_video_file_size']){assert.equal(publicAfter.event[key],publicAfter.event.max_file_size);delete publicAfter.event[key];}
+    assert.deepEqual(publicAfter,publicBefore);
     assert.equal((await fetch(base + `/e/${event.public_id}`)).status, 200);
     assert.equal(docker(['exec', app, 'sha256sum', `/data/uploads/e${event.id}_${local.id}`]).split(' ')[0], sha(localBytes));
     docker(['exec', '-u', '10001', app, 'photodrop', 'export', '--event', String(event.id), '--output', `/data/export-${label}`]);
     const manifest = JSON.parse(docker(['exec', app, 'cat', `/data/export-${label}/photodrop-manifest.json`]));
-    assert.equal(manifest.assets.length, 2);
+    assert.equal(manifest.assets.length, localVideo ? 3 : 2);
     for (const entry of manifest.assets) {
-      const expected = entry.photoDropAssetId === local.id ? localBytes : remoteBytes;
+      const expected = entry.photoDropAssetId === local.id ? localBytes : entry.photoDropAssetId === localVideo?.id ? videoBytes : remoteBytes;
       assert.equal(docker(['exec', app, 'sha256sum', `/data/export-${label}/photos/${entry.exportFilename}`]).split(' ')[0], sha(expected));
     }
     // Runtime policy switches preserve the pre-existing local session, even with
@@ -136,7 +159,7 @@ try {
     }
     stop();
     const after=state('snapshot',volume);
-    assert.equal(after.schema_migrations.length,11);
+    assert.equal(after.schema_migrations.length,12);
     assert.deepEqual(after.schema_migrations.slice(0,oldMigrations.length),before.schema_migrations);
     for(const entry of after.schema_migrations.slice(oldMigrations.length)){
       assert.equal(entry.checksum,sha(readFileSync(`migrations/${entry.name}`,'utf8').replaceAll('\r\n','\n')));
@@ -144,7 +167,10 @@ try {
     const expected=structuredClone(before);
     expected.schema_migrations=after.schema_migrations;
     if(oldMigrations.length<10)for(const binding of expected.immich_event_imports) binding.auto_import=0;
+    for(const event of expected.events) for(const field of typedFields) event[field]=null;
+    for(const asset of expected.assets){const mime=asset.status==='ready'?asset.mime_type:asset.expected_mime_type;asset.media_class=mime?.startsWith('video/')?'video':mime?.startsWith('image/')?'photo':null;}
     assert.deepEqual(after,expected,'upgrade changed existing application data');
+    if(label==='upgrade') copyVolume(data,upgradedBackup);
     console.log(`${label}: health, old/new login, event/public URL, local/S3 hashes, names, quotas, backend identity, pending/ready, migrations and Immich metadata passed.`);
   }
   console.log('Stopped backup and destructive disposable restore passed; S3 objects remained external and unchanged.');

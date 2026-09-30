@@ -117,3 +117,7 @@ Export reads DATA_DIR and storage configuration only; there are no additional
 export environment variables. Version is build-time metadata. `PHOTODROP_IMAGE`
 is **Compose-only**: default `photodrop:local`, or a released GHCR tag/digest.
 `PHOTODROP_TEST_*` and browser-fixture switches are not production configuration.
+
+## Event upload policy
+
+Per-event photo/video count, individual size and storage limits are stored in SQLite, not environment variables. `PHOTODROP_MAX_FILE_SIZE` remains the hard server ceiling. See [event limits and API fields](quotas.md) for independent buckets, overall safety ceilings and generic upload-session limits.

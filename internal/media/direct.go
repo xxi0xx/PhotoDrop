@@ -20,6 +20,7 @@ type Preparation struct {
 	Size        int64  `json:"size"`
 	ContentType string `json:"content_type"`
 	RequestID   string `json:"request_id"`
+	MediaClass  string `json:"media_class"`
 }
 type Prepared struct {
 	Asset  Asset              `json:"asset"`
@@ -33,6 +34,7 @@ type directAsset struct {
 	expectedSize      int64
 	deleting, enabled bool
 	expiry            *string
+	mediaClass        *string
 }
 
 func (s *Service) checkDirectKey(eventID int64, id, key string, backendID int64) (storage.Direct, error) {
@@ -53,10 +55,10 @@ func (s *Service) loadDirect(ctx context.Context, publicID, sessionID, id string
 	if !validID(id) || !validID(sessionID) {
 		return a, ErrAsset
 	}
-	err := s.db.QueryRowContext(ctx, `SELECT a.id,a.original_filename,a.mime_type,a.size_bytes,a.status,a.event_id,a.storage_key,a.storage_backend_id,a.expected_mime_type,a.expected_size_bytes,e.deleting,e.enabled,e.expires_at
+	err := s.db.QueryRowContext(ctx, `SELECT a.id,a.original_filename,a.mime_type,a.size_bytes,a.status,a.event_id,a.storage_key,a.storage_backend_id,a.expected_mime_type,a.expected_size_bytes,e.deleting,e.enabled,e.expires_at,a.media_class
  FROM assets a JOIN events e ON e.id=a.event_id JOIN upload_sessions u ON u.id=a.upload_session_id AND u.event_id=e.id
  JOIN storage_backends b ON b.id=a.storage_backend_id
- WHERE e.public_id=? AND u.id=? AND a.id=? AND b.type='s3'`, publicID, sessionID, id).Scan(&a.ID, &a.Filename, &a.MIMEType, &a.Size, &a.Status, &a.eventID, &a.key, &a.backendID, &a.expectedType, &a.expectedSize, &a.deleting, &a.enabled, &a.expiry)
+ WHERE e.public_id=? AND u.id=? AND a.id=? AND b.type='s3'`, publicID, sessionID, id).Scan(&a.ID, &a.Filename, &a.MIMEType, &a.Size, &a.Status, &a.eventID, &a.key, &a.backendID, &a.expectedType, &a.expectedSize, &a.deleting, &a.enabled, &a.expiry, &a.mediaClass)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrAsset
 	}
@@ -83,6 +85,14 @@ func (s *Service) Prepare(ctx context.Context, publicID, sessionID string, p Pre
 	}
 	kind, _, _ := mime.ParseMediaType(p.ContentType)
 	p.ContentType = kind
+	inferred := Class(kind)
+	if p.MediaClass == "" {
+		p.MediaClass = inferred
+	}
+	if (p.MediaClass != "photo" && p.MediaClass != "video") || (inferred != "" && inferred != p.MediaClass) {
+		return Prepared{}, ErrType
+	}
+
 	if p.Size <= 0 {
 		return Prepared{}, ErrEmpty
 	}
@@ -116,9 +126,10 @@ func (s *Service) Prepare(ctx context.Context, publicID, sessionID string, p Pre
 		}
 		var id, name, contentType string
 		var size int64
-		err = tx.QueryRowContext(ctx, "SELECT id,original_filename,expected_size_bytes,expected_mime_type FROM assets WHERE upload_session_id=? AND client_request_id=?", sessionID, p.RequestID).Scan(&id, &name, &size, &contentType)
+		var existingClass *string
+		err = tx.QueryRowContext(ctx, "SELECT id,original_filename,expected_size_bytes,expected_mime_type,media_class FROM assets WHERE upload_session_id=? AND client_request_id=?", sessionID, p.RequestID).Scan(&id, &name, &size, &contentType, &existingClass)
 		if err == nil {
-			if name != p.Filename || size != p.Size || contentType != p.ContentType {
+			if name != p.Filename || size != p.Size || contentType != p.ContentType || (existingClass != nil && *existingClass != p.MediaClass) {
 				return "", ErrRequest
 			}
 			return id, tx.Commit()
@@ -126,12 +137,19 @@ func (s *Service) Prepare(ctx context.Context, publicID, sessionID string, p Pre
 		if !errors.Is(err, sql.ErrNoRows) {
 			return "", err
 		}
-		id = randomID()
-		if err := reserve(ctx, tx, e.ID, sessionID, p.Size, q); err != nil {
+		effective, err := fileLimit(ctx, tx, e.ID, p.MediaClass, limit)
+		if err != nil {
 			return "", err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO assets(id,event_id,upload_session_id,original_filename,storage_key,status,created_at,storage_provider,storage_target,expected_size_bytes,expected_mime_type,client_request_id,storage_backend_id,contributor_name)
-   VALUES(?,?,?,?,?,'pending',?,'s3',?,?,?,?,?,?)`, id, e.ID, sessionID, p.Filename, direct.Key(e.ID, id), timestamp(), direct.Target(), p.Size, p.ContentType, p.RequestID, active.ID, q.contributor)
+		if p.Size > effective {
+			return "", fileQuota(p.MediaClass)
+		}
+		id = randomID()
+		if err := reserve(ctx, tx, e.ID, sessionID, p.Size, q, p.MediaClass); err != nil {
+			return "", err
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO assets(id,event_id,upload_session_id,original_filename,storage_key,status,created_at,storage_provider,storage_target,expected_size_bytes,expected_mime_type,client_request_id,storage_backend_id,contributor_name,media_class)
+   VALUES(?,?,?,?,?,'pending',?,'s3',?,?,?,?,?,?,?)`, id, e.ID, sessionID, p.Filename, direct.Key(e.ID, id), timestamp(), direct.Target(), p.Size, p.ContentType, p.RequestID, active.ID, q.contributor, p.MediaClass)
 		if err != nil {
 			return "", err
 		}
@@ -259,6 +277,11 @@ func (s *Service) Complete(ctx context.Context, publicID, sessionID, id string) 
 	if err != nil {
 		return reject(err)
 	}
+	class := Class(kind)
+	if a.mediaClass != nil && *a.mediaClass != class {
+		return reject(ErrType)
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Asset{}, err
@@ -273,8 +296,22 @@ func (s *Service) Complete(ctx context.Context, publicID, sessionID, id string) 
 	if deleting {
 		return Asset{}, ErrClosed
 	}
+	if a.mediaClass == nil {
+		// Unknown historical rows never held a typed reservation. Claim one under
+		// this write transaction without double-counting overall/session usage.
+		limit, err := fileLimit(ctx, tx, a.eventID, class, s.fileCeiling)
+		if err != nil {
+			return Asset{}, err
+		}
+		if info.Size > limit {
+			return Asset{}, fileQuota(class)
+		}
+		if err := reserveClass(ctx, tx, a.eventID, class, info.Size); err != nil {
+			return Asset{}, err
+		}
+	}
 	now := timestamp()
-	result, err := tx.ExecContext(ctx, "UPDATE assets SET status='ready',size_bytes=?,mime_type=?,completed_at=? WHERE id=? AND status='pending'", info.Size, kind, now, id)
+	result, err := tx.ExecContext(ctx, "UPDATE assets SET status='ready',size_bytes=?,mime_type=?,completed_at=?,media_class=? WHERE id=? AND status='pending'", info.Size, kind, now, class, id)
 	if err != nil {
 		return Asset{}, err
 	}

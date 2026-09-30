@@ -186,8 +186,8 @@ func (r *callbackReader) Read(p []byte) (int, error) {
 
 func TestAvailabilityDuringUploadAndDeletion(t *testing.T) {
 	s, dir, e, session := fixture(t)
-	data := testutil.Images()["image/jpeg"]
-	reader := &callbackReader{reader: bytes.NewReader(data), callback: func() {
+	data := append(testutil.Images()["image/jpeg"], make([]byte, 512)...)
+	reader := &callbackReader{reader: bytes.NewReader(data[512:]), callback: func() {
 		if countAssets(t, s, "pending") != 1 {
 			t.Fatal("missing pending row before receiving media")
 		}
@@ -204,7 +204,7 @@ func TestAvailabilityDuringUploadAndDeletion(t *testing.T) {
 			t.Fatal("upload holds a database transaction while reading", err)
 		}
 	}}
-	if _, err := s.Upload(t.Context(), e.PublicID, session.ID, "a.jpg", "image/jpeg", reader, -1, 1000); !errors.Is(err, ErrClosed) {
+	if _, err := s.Upload(t.Context(), e.PublicID, session.ID, "a.jpg", "image/jpeg", io.MultiReader(bytes.NewReader(data[:512]), reader), -1, 2048); !errors.Is(err, ErrClosed) {
 		t.Fatalf("event closed during upload: %v", err)
 	}
 	if countAssets(t, s, "ready") != 0 || countAssets(t, s, "pending") != 0 {

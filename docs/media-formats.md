@@ -7,8 +7,9 @@ AVIF remains unsupported. Legacy MOV without a leading `ftyp` is unsupported.
 
 Local and direct S3 finalization use the same signature classifier. Filenames
 and declared MIME types do not establish the final stored MIME type. An empty
-or `application/octet-stream` declaration is allowed; the bytes must still pass
-validation. The public `unsupported_image` error code remains for client
+or `application/octet-stream` declaration is allowed locally; direct S3 requires
+an explicit photo/video reservation class when MIME is ambiguous. Bytes must
+still pass signature validation and match the reserved class. The public `unsupported_image` error code remains for client
 compatibility, but its message describes media. `photo_count` and the export
 manifest's `photos/` directory also remain unchanged and include video.
 
@@ -35,8 +36,10 @@ or antivirus scan. Corruption outside the inspected prefix may only be detected
 by the consuming application. PhotoDrop does not decode, transcode, extract
 metadata, generate thumbnails, or offer playback. Immich processes imported media.
 
-`PHOTODROP_MAX_FILE_SIZE` applies equally to images and videos. Event and session
-asset/byte quotas count both. Video support itself adds no settings or migrations;
+`PHOTODROP_MAX_FILE_SIZE` is the global ceiling for both classes. Independent
+event photo/video limits can be smaller; overall event and generic session
+asset/byte quotas still count both. See [per-media quotas](quotas.md), introduced
+with migration 012. Video support itself adds no settings or migrations;
 the separate opt-in Immich policy uses migration 010. Existing
 v1.0 data and historical backend records work unchanged. Local transfers pass
 through PhotoDrop and any reverse proxy's body/time limits; direct S3 sends media

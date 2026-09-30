@@ -56,7 +56,12 @@ func directFixture(t *testing.T) (*Service, string, events.Event, Session, *s3te
 }
 func prepare(t *testing.T, s *Service, e events.Event, session Session, kind string, data []byte) Prepared {
 	t.Helper()
-	p, err := s.Prepare(t.Context(), e.PublicID, session.ID, Preparation{"../../<script>file.jpg", int64(len(data)), kind, randomID()}, 1024*1024)
+	hint := ""
+	if kind == "application/octet-stream" || kind == "" {
+		actual, _ := Sniff(data, int64(len(data)))
+		hint = Class(actual)
+	}
+	p, err := s.Prepare(t.Context(), e.PublicID, session.ID, Preparation{"../../<script>file.jpg", int64(len(data)), kind, randomID(), hint}, 1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,8 +140,8 @@ func TestDirectFormatsAndIdempotentCompletion(t *testing.T) {
 func TestDirectPrepareValidationIsolationAndRefresh(t *testing.T) {
 	s, _, e, session, _, _ := directFixture(t)
 	data := testutil.Images()["image/png"]
-	input := Preparation{"same.png", int64(len(data)), "image/png", randomID()}
-	for _, bad := range []Preparation{{"", 10, "image/png", randomID()}, {strings.Repeat("x", 256), 10, "image/png", randomID()}, {"x", 0, "image/png", randomID()}, {"x", 1025, "image/png", randomID()}, {"x", 10, "video/webm", randomID()}, {"x", 10, "image/png", "bad"}} {
+	input := Preparation{"same.png", int64(len(data)), "image/png", randomID(), ""}
+	for _, bad := range []Preparation{{"", 10, "image/png", randomID(), ""}, {strings.Repeat("x", 256), 10, "image/png", randomID(), ""}, {"x", 0, "image/png", randomID(), ""}, {"x", 1025, "image/png", randomID(), ""}, {"x", 10, "video/webm", randomID(), ""}, {"x", 10, "image/png", "bad", ""}} {
 		if _, err := s.Prepare(t.Context(), e.PublicID, session.ID, bad, 1024); err == nil {
 			t.Fatal("accepted bad metadata")
 		}

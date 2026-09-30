@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Independent per-event photo/video count, file-size and storage limits, with
+  separate admin usage panels and guest preflight. Migration 012 preserves old
+  overall ceilings, backfills typed reservations and safely admits legacy pending
+  media. Local signature and direct-S3 class verification keep quotas race-safe.
+
 - Native OIDC administrator sign-in with Authentik setup guidance, explicit
   subject/group authorization, authorization-code + PKCE, browser-bound one-time
   transactions and existing local sessions. Password-only remains the default;
