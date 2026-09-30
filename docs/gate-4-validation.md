@@ -1,5 +1,7 @@
 # Gate 4 validation
 
+> Historical validation record; not current product or release status.
+
 Historical implementation-time record. The owner later completed
 [live R2 validation](live-validation.md) on 2026-09-24 (America/Chicago).
 

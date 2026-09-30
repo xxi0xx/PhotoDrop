@@ -1,14 +1,32 @@
 <script lang="ts">
   import { formatBytes, type EventRecord } from '../lib/api';
-  import { quotaFields, quotaStatuses, type QuotaKey, type QuotaDraft } from '../lib/quotas';
-  let { draft = $bindable(), event, fields, disabled }: { draft: QuotaDraft; event: EventRecord | null; fields: Record<string, string>; disabled: boolean } = $props();
-  const groups: { title: string; kind: 'photos' | 'videos'; keys: QuotaKey[] }[] = [
-    { title: 'Photo limits', kind: 'photos', keys: ['max_photos', 'max_photo_file_bytes', 'max_photo_storage_bytes'] },
-    { title: 'Video limits', kind: 'videos', keys: ['max_videos', 'max_video_file_bytes', 'max_video_storage_bytes'] },
+  import { calculatedQuota, editQuota, quotaFields, quotaStatuses, type QuotaKey, type QuotaDraft, type QuotaModes, type MediaClass } from '../lib/quotas';
+  let { draft = $bindable(), modes = $bindable(), event, fields, disabled }: { draft: QuotaDraft; modes: QuotaModes; event: EventRecord | null; fields: Record<string, string>; disabled: boolean } = $props();
+  const groups: { title: string; kind: 'photos' | 'videos'; media: MediaClass; keys: QuotaKey[] }[] = [
+    { title: 'Photo limits', kind: 'photos', media: 'photo', keys: ['max_photos', 'max_photo_file_bytes', 'max_photo_storage_bytes'] },
+    { title: 'Video limits', kind: 'videos', media: 'video', keys: ['max_videos', 'max_video_file_bytes', 'max_video_storage_bytes'] },
   ];
+  function value(key: QuotaKey, media?: MediaClass) {
+    if (media && modes[media] === 'automatic') {
+      const bytes = calculatedQuota(draft, event, media).bytes;
+      return bytes == null ? undefined : Number((bytes / quotaFields[key].unit).toFixed(9));
+    }
+    return draft[key];
+  }
+  function change(key: QuotaKey, value: number | undefined) { ({ draft, modes } = editQuota(draft, modes, key, value)); }
 </script>
-{#snippet input(key: QuotaKey)}
-  <div class="field"><label for={key}>{quotaFields[key].label}</label><input id={key} name={key} type="number" min={quotaFields[key].unit === 1 ? 1 : 0.000000001} max={quotaFields[key].unit === 1 ? 1000000 : 1125899906842624 / quotaFields[key].unit} step={quotaFields[key].unit === 1 ? 1 : 'any'} bind:value={draft[key]} aria-invalid={!!fields[key]} aria-describedby={fields[key] ? `${key}-error` : 'quota-hint'} />{#if fields[key]}<p class="error" id={`${key}-error`}>{fields[key]}</p>{/if}</div>
+{#snippet input(key: QuotaKey, media?: MediaClass)}
+  {@const calculationError = media && modes[media] === 'automatic' ? calculatedQuota(draft, event, media).error : undefined}
+  {@const error = calculationError || fields[key]}
+  <div class="field">
+    <label for={key}>{quotaFields[key].label}</label>
+    <input id={key} name={key} type="number" min={quotaFields[key].unit === 1 ? 1 : 0.000000001} max={quotaFields[key].unit === 1 ? 1000000 : 1125899906842624 / quotaFields[key].unit} step={quotaFields[key].unit === 1 ? 1 : 'any'} bind:value={() => value(key, media), next => change(key, next)} aria-invalid={!!error} aria-describedby={`quota-hint${media ? ` ${key}-mode` : ''}${error ? ` ${key}-error` : ''}`} />
+    {#if error}<p class="error" id={`${key}-error`}>{error}</p>{/if}
+    {#if media}
+      <p class="hint" id={`${key}-mode`}>{#if modes[media] === 'automatic'}Calculated from maximum count × maximum file size. Both are needed; clearing either leaves storage unlimited until restored.{:else}Custom total storage limit. Blank means unlimited; changing count or file size keeps this total.{/if}</p>
+      {#if modes[media] === 'custom'}<button class="text-button" type="button" onclick={() => modes = { ...modes, [media]: 'automatic' }}>Use calculated maximum<span class="sr-only"> for {media}s</span></button>{/if}
+    {/if}
+  </div>
 {/snippet}
 <p id="quota-hint" class="hint">Leave a limit blank for no limit at that scope. Completed and pending files count. The first applicable limit reached wins. The server also caps individual file size. 1 MiB = 1,048,576 bytes; 1 GiB = 1,073,741,824 bytes.</p>
 {#if event}{#each quotaStatuses(event) as status}<p class="notice" role="status">{status}. Existing media are safe.</p>{/each}{/if}
@@ -16,7 +34,7 @@
   {#each groups as group}
     <fieldset {disabled} class="quota-panel"><legend>{group.title}</legend>
       {#if event}{@const usage = event.media[group.kind]}<dl class="stat-grid"><div><dt>{group.kind === 'photos' ? 'Photos' : 'Videos'}</dt><dd>{usage.ready_count}{#if event[group.keys[0]] != null}<small> / {event[group.keys[0]]}</small>{/if}</dd></div><div><dt>Storage</dt><dd>{formatBytes(usage.bytes)}{#if event[group.keys[2]] != null}<small> / {formatBytes(event[group.keys[2]]!)}</small>{/if}</dd></div></dl><p class="hint">{usage.pending_count} pending, reserving {formatBytes(usage.reserved_bytes)}.</p>{/if}
-      {#each group.keys as key}{@render input(key)}{/each}
+      {#each group.keys as key}{@render input(key, key === group.keys[2] ? group.media : undefined)}{/each}
     </fieldset>
   {/each}
 </div>

@@ -1,5 +1,7 @@
 # v1.1 Phase 4 validation: native OIDC
 
+> Historical validation record; not current product or release status.
+
 Validated September 27, 2026, from merged Phase 3
 `e5a97e49bdadb740389f01cade7a88065eb57f70` on
 `codex/v11-oidc-admin-auth`. Implementation checkpoint `e42dc37` was pushed after

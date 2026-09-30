@@ -1,5 +1,7 @@
 # v1.1 Phase 4.5 validation: independent media quotas
 
+> Historical validation record; not current product or release status.
+
 Validated September 29, 2026 on `codex/v11-per-media-quotas`, based on merged
 Phase 4 `95fbffa29d26b45e2e53f92b2128e4c231a860af`. Checkpoint
 `bc0cc71a538999686024e56cad3a3fad21c14ecc` was committed and pushed after quota,

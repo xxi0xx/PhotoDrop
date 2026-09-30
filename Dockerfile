@@ -25,7 +25,7 @@ LABEL org.opencontainers.image.source="https://github.com/xxi0xx/PhotoDrop" \
       org.opencontainers.image.revision=$REVISION \
       org.opencontainers.image.version=$VERSION \
       org.opencontainers.image.title="PhotoDrop" \
-      org.opencontainers.image.description="Self-hosted event photo collection" \
+      org.opencontainers.image.description="Self-hosted event photo and video collection" \
       org.opencontainers.image.licenses="Apache-2.0"
 RUN apk add --no-cache su-exec \
     && addgroup -g 10001 photodrop \

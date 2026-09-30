@@ -1,10 +1,33 @@
-# Event photo and video limits (unreleased v1.1)
+# Event photo and video limits
 
 In **Manage event → Guest uploads**, set Photo limits and Video limits independently.
 Expand **Overall limits** for optional ceilings shared by both types. Blank means
 unlimited at that event scope, not unlimited server or upload-session capacity.
 The editor displays individual sizes in MiB and storage in GiB, stores integer
 bytes, and preserves exact stored bytes when a displayed value is unchanged.
+
+## Calculated or custom storage
+
+New events start each type in automatic mode: maximum count × individual file
+size gives its total storage. File size is converted from binary MiB to integer
+bytes before multiplication; the GiB display is never used as the formula input.
+For example, 500 photos × 25 MiB gives 13,107,200,000 bytes, while 20 videos ×
+500 MiB gives 10,485,760,000 bytes. The server ceiling must permit the individual
+size (the default is 50 MiB). An invalid or above-1-PiB result cannot be saved.
+
+Changing either prerequisite recalculates only that type. Clearing a prerequisite
+clears its automatic total; filling both again resumes calculation. Editing or
+clearing the total switches to custom mode. A custom blank is intentionally
+unlimited and stays blank even when count/file size changes. Select **Use calculated
+maximum** to explicitly restore the link. A custom total above the theoretical
+product is valid and is not rewritten. Overall `max_bytes` is always independent.
+
+Existing events initialize linked only when both prerequisites exist and the stored
+total exactly equals their integer product. Any other stored total, including NULL,
+starts custom. Unrelated edits preserve exact bytes and never impose a quota on an
+unlimited event. The mode is editor-only, reconstructed when an event is opened;
+the API still stores the same explicit byte fields. No new migration or backend
+policy is needed. Server reservations enforce saved limits regardless of UI mode.
 
 | Event API field | Meaning | Accepted value |
 | --- | --- | --- |

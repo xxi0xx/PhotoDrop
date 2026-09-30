@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Immich from './Immich.svelte';
   import QuotaEditor from './QuotaEditor.svelte';
-  import { quotaDraft, quotaPayload } from '../lib/quotas';
+  import { quotaDraft, quotaPayload, quotaModes, QuotaCalculationError } from '../lib/quotas';
   import ShareEvent from './ShareEvent.svelte';
   import { onMount, tick } from 'svelte';
   import { request, message, publicURL, localDateTime, formatBytes, APIError, type EventRecord } from '../lib/api';
@@ -10,6 +10,7 @@
   let event = $state<EventRecord | null>(null);
   let name = $state(''); let description = $state(''); let eventDate = $state(''); let enabled = $state(true); let expiration = $state('');
   let quotas = $state(quotaDraft(null));
+  let modes = $state(quotaModes(null));
   let targets = $state<ImmichTargets>({active_target:'',targets:[]});
   let targetError = $state(''); let setupImmich = $state(false); let immichTarget = $state(''); let albumDraft = $state<string | null>(null);
   const newAlbumName = $derived(suggestedAlbum(name, albumDraft));
@@ -22,7 +23,7 @@
   let loading = $state(true); let loadError = $state(''); let busy = $state(false); let error = $state(''); let notice = $state('');
   let fields = $state<Record<string, string>>({}); let confirming = $state(false); let confirmButton = $state<HTMLButtonElement>(); let deleteButton = $state<HTMLButtonElement>();
   async function keepEvent() { confirming = false; await tick(); deleteButton?.focus(); }
-  function apply(saved: EventRecord) { event = saved; name = saved.name; description = saved.description; eventDate = saved.event_date ?? ''; enabled = saved.enabled; expiration = localDateTime(saved.expires_at); quotas = quotaDraft(saved); }
+  function apply(saved: EventRecord, initialize = true) { event = saved; name = saved.name; description = saved.description; eventDate = saved.event_date ?? ''; enabled = saved.enabled; expiration = localDateTime(saved.expires_at); quotas = quotaDraft(saved); if (initialize) modes = quotaModes(saved); }
   async function load() {
     if (!id) { await loadTargets(); loading = false; return; }
     loading = true; loadError = '';
@@ -33,12 +34,12 @@
   async function save(submit: SubmitEvent) {
     submit.preventDefault(); busy = true; error = ''; notice = ''; fields = {};
     try {
-      const data = { name, description, event_date: eventDate || null, enabled, expires_at: expiration ? new Date(expiration).toISOString() : null, ...quotaPayload(quotas, event),
+      const data = { name, description, event_date: eventDate || null, enabled, expires_at: expiration ? new Date(expiration).toISOString() : null, ...quotaPayload(quotas, event, modes),
         ...(!id && setupImmich ? {immich:{target:immichTarget,album_name:newAlbumName,auto_import:autoImport}} : {}) };
       const result = await request<{ event: EventRecord }>(id ? `/api/admin/events/${id}` : '/api/admin/events', id ? 'PUT' : 'POST', data);
       if (!id) { window.location.assign(`/admin/events/${result.event.id}`); return; }
-      apply(result.event); notice = 'Event saved.';
-    } catch (cause) { error = message(cause); if (cause instanceof APIError) fields = cause.fields; }
+      apply(result.event, false); notice = 'Event saved.';
+    } catch (cause) { error = message(cause); if (cause instanceof APIError || cause instanceof QuotaCalculationError) fields = cause.fields; }
     finally { busy = false; }
   }
   async function copyExport() {
@@ -100,7 +101,7 @@
         {#if event.contributors?.length}<h3>Shared by</h3><ul class="contributor-list">{#each event.contributors as contributor}<li><span>{contributor.name ?? 'Anonymous'}</span><strong>{contributor.photo_count} {contributor.photo_count === 1 ? 'file' : 'files'}</strong></li>{/each}</ul><p class="hint">Optional names supplied by guests, not verified identities. Up to 100 names shown.</p>{/if}
         <button type="button" class="text-button" disabled={refreshingStats} onclick={refreshStats}>{refreshingStats ? 'Refreshing…' : 'Refresh file counts'}</button>
       {/if}
-      <QuotaEditor bind:draft={quotas} {event} {fields} disabled={busy || !!event?.deleting} />
+      <QuotaEditor bind:draft={quotas} bind:modes {event} {fields} disabled={busy || !!event?.deleting} />
     </section>
     <div class="actions save-actions"><button type="submit" disabled={busy || event?.deleting}>{busy ? 'Saving…' : id ? 'Save changes' : 'Create event'}</button><a href="/admin">Cancel</a></div></form>
     {#if event}<Immich eventID={event.id} deleting={event.deleting} />{/if}

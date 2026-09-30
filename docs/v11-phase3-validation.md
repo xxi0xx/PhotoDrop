@@ -1,5 +1,7 @@
 # v1.1 Phase 3 validation
 
+> Historical validation record; not current product or release status.
+
 Validated 2026-09-27 on `codex/v11-immich-auto-import`, based on merged Phase 2
 `73b7eee9c7c252dedf8a441a38971c144403c247`. This is unreleased development work.
 

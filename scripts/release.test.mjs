@@ -6,6 +6,31 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { releasePlan } from './release.mjs';
+import { changelogNotes } from './release-notes.mjs';
+import { releaseLanguageErrors } from './release-language.mjs';
+
+test('1.1.0 stable plan and exact version notes exclude future work and older releases', () => {
+  const plan = releasePlan('v1.1.0', 'xxi0xx/PhotoDrop');
+  assert.equal(plan.version, '1.1.0'); assert.equal(plan.prerelease, false);
+  assert.equal(plan.immutable, 'ghcr.io/xxi0xx/photodrop:1.1.0');
+  assert.deepEqual(plan.aliases, ['ghcr.io/xxi0xx/photodrop:1.1', 'ghcr.io/xxi0xx/photodrop:1', 'ghcr.io/xxi0xx/photodrop:latest']);
+  const changelog = readFileSync('CHANGELOG.md', 'utf8'), notes = changelogNotes(plan.version, changelog);
+  assert.match(notes, /^## \[1\.1\.0\]/); assert.doesNotMatch(notes, /Unreleased|\[1\.0\.0\]|Phase \d|Gate \d/i);
+  assert.equal(changelog.split('## [Unreleased]')[1].split('## [1.1.0]')[0].trim(), '');
+  assert.deepEqual(releaseLanguageErrors('notes.md', notes), []);
+  assert.equal(changelogNotes('1.0.0', 'Old whole-file notes\n'), 'Old whole-file notes\n');
+  assert.throws(() => changelogNotes('2.0.0', changelog), /exactly one/);
+  assert.throws(() => changelogNotes('1.1.0', changelog + '\n## [1.1.0]\nduplicate'), /exactly one/);
+});
+
+test('release-language scope rejects stale product status but permits marked history and generic policy', () => {
+  for (const phrase of ['unreleased v1.1', 'development version', 'development branch', 'video support is unreleased', 'before stable images are published', 'until stable images are published', 'Phase 4.5', 'Unreleased Phase 4', 'Unreleased v1.1 Phase 3', '1.1.0-dev']) {
+    assert.notEqual(releaseLanguageErrors('README.md', phrase).length, 0, phrase);
+    assert.equal(releaseLanguageErrors('docs/v11-phase45-validation.md', '> Historical validation record; not current product or release status.\n' + phrase).length, 0);
+  }
+  assert.notEqual(releaseLanguageErrors('docs/v11-phase45-validation.md', 'unmarked history').length, 0);
+  assert.deepEqual(releaseLanguageErrors('docs/releases.md', 'Generic dev source build; SemVer prerelease v1.2.0-rc.1'), []);
+});
 
 test('root license matches canonical Apache License 2.0 text', () => {
   // Canonical https://www.apache.org/licenses/LICENSE-2.0.txt; tolerate checkout CRLF only.
@@ -46,7 +71,7 @@ test('OCI verification requires Apache-2.0, rejecting absent or different licens
 
 test('stable and prerelease tags', () => {
   assert.deepEqual(releasePlan('v1.0.0', 'xxi0xx/PhotoDrop'), { version: '1.0.0', image: 'ghcr.io/xxi0xx/photodrop', immutable: 'ghcr.io/xxi0xx/photodrop:1.0.0', prerelease: false, aliases: ['ghcr.io/xxi0xx/photodrop:1.0', 'ghcr.io/xxi0xx/photodrop:1', 'ghcr.io/xxi0xx/photodrop:latest'] });
-  assert.deepEqual(releasePlan('v1.1.0-rc.1', 'xxi0xx/PhotoDrop').aliases, []);
+  assert.deepEqual(releasePlan('v1.2.0-rc.1', 'xxi0xx/PhotoDrop').aliases, []);
   for (const tag of ['1.0.0', 'v01.0.0', 'v1.0', 'v1.0.0-01', 'v1.0.0+build', 'v1.0.0\n', 'v1.0.0-']) assert.throws(() => releasePlan(tag, 'xxi0xx/PhotoDrop'), tag);
 });
 test('PR, dispatch and branch events cannot enter publish path', () => {
@@ -104,7 +129,7 @@ test('actual dev and injected binaries report version without configuration', ()
   const dir = mkdtempSync(join(tmpdir(), 'photodrop-version-'));
   const binary = join(dir, process.platform === 'win32' ? 'photodrop.exe' : 'photodrop');
   try {
-    for (const [flags, expected] of [['', 'PhotoDrop dev'], ['-X photodrop/internal/buildinfo.Version=1.0.0', 'PhotoDrop 1.0.0'], ['-X photodrop/internal/buildinfo.Commit=abcdef', 'PhotoDrop dev (abcdef)'], ['-X photodrop/internal/buildinfo.Version=1.1.0-rc.1 -X photodrop/internal/buildinfo.Commit=abcdef', 'PhotoDrop 1.1.0-rc.1 (abcdef)']]) {
+    for (const [flags, expected] of [['', 'PhotoDrop dev'], ['-X photodrop/internal/buildinfo.Version=1.1.0', 'PhotoDrop 1.1.0'], ['-X photodrop/internal/buildinfo.Commit=abcdef', 'PhotoDrop dev (abcdef)'], ['-X photodrop/internal/buildinfo.Version=1.2.0-rc.1 -X photodrop/internal/buildinfo.Commit=abcdef', 'PhotoDrop 1.2.0-rc.1 (abcdef)']]) {
       execFileSync('go', ['build', '-trimpath', '-buildvcs=false', '-ldflags', flags, '-o', binary, './cmd/photodrop'], { env: { ...process.env, CGO_ENABLED: '0' } });
       assert.equal(execFileSync(binary, ['version'], { encoding: 'utf8', env: { ...process.env, PHOTODROP_ADMIN_PASSWORD: '' } }).trim(), expected);
     }

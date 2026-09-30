@@ -1,6 +1,6 @@
 # Backup and restore
 
-Back up the complete persistent state, not just exported photos:
+Back up the complete persistent state, not just exported media:
 
 ```text
 /data/photodrop.db       events, auth/sessions, assets, quotas, backend identities,
@@ -68,7 +68,7 @@ import policy. Enabled, ready bindings reconcile untracked media after restore;
 turn the policy off if the restored copy must not select new work. Isolate the
 network or withhold Immich keys during
 verification, then restore matching credentials. See [upgrading](upgrading.md)
-and [tested scenarios](gate-8-validation.md).
+and [tested scenarios](v1.1.0-validation.md).
 
 Migration 011 adds short-lived OIDC transactions to `/data/photodrop.db`; their
 PKCE verifiers are sensitive even though state/nonce/browser bindings are hashed.
@@ -78,6 +78,6 @@ browser tab. Preserve private client/issuer/allowlist configuration separately.
 Existing PhotoDrop sessions can survive restore until their original expiry;
 revocation guidance is in [OIDC authentication](oidc.md).
 
-## Typed quota state (unreleased v1.1)
+## Typed quota state
 
-A stopped whole-data backup includes event limits, asset media classes and pending reservations; no separate quota ledger exists. Migration 012 leaves old overall limits intact and new limits unlimited. Keep external S3 objects and historical backend configuration alongside the database backup responsibility. The disposable release smoke upgrades exact Phase 4 data containing photos/videos, pending media, attribution, quotas, backend and Immich records, then restores a stopped upgraded backup and checks identity and exported byte hashes. See [quota upgrade semantics](quotas.md).
+A stopped whole-data backup includes event limits, asset media classes and pending reservations; no separate quota ledger exists. Migration 012 leaves old overall limits intact and new limits unlimited. Keep external S3 objects and historical backend configuration alongside the database backup responsibility. The disposable release smoke upgrades the recorded predecessor data containing photos/videos, pending media, attribution, quotas, backend and Immich records, then restores a stopped upgraded backup and checks identity and exported byte hashes. See [quota upgrade semantics](quotas.md).

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { recoveryPlan, releasePlan, writePlanOutputs } from './release.mjs';
+import { changelogNotes } from './release-notes.mjs';
 import { command } from './verify-published.mjs';
 
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
@@ -30,7 +31,7 @@ export function registryDigest(reference, run = command, allowMissing = false) {
   assert.match(digest, digestPattern);
   return digest;
 }
-const notes = (plan, changelog) => `Container: \`${plan.image}@${plan.digest}\`\n\n${changelog}`;
+const notes = (plan, changelog) => `Container: \`${plan.image}@${plan.digest}\`\n\n${changelogNotes(plan.version, changelog)}`;
 
 export function prepareRecovery(tag, expectedDigest, env = process.env, run = command) {
   const policy = recoveryPlan(tag, env);

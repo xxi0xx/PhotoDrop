@@ -1,31 +1,34 @@
 # Changelog
 
+<!-- release-notes: version-section -->
+
 ## [Unreleased]
 
-- Independent per-event photo/video count, file-size and storage limits, with
-  separate admin usage panels and guest preflight. Migration 012 preserves old
-  overall ceilings, backfills typed reservations and safely admits legacy pending
-  media. Local signature and direct-S3 class verification keep quotas race-safe.
+## [1.1.0] — 2026-09-30
 
-- Native OIDC administrator sign-in with Authentik setup guidance, explicit
-  subject/group authorization, authorization-code + PKCE, browser-bound one-time
-  transactions and existing local sessions. Password-only remains the default;
-  optional OIDC-only and combined modes isolate provider outages from uploads.
-  Migration 011 adds short-lived login transactions without changing session schema.
+- Collect MP4 and QuickTime MOV videos alongside JPEG, PNG, WebP, GIF, HEIC and
+  HEIF photos. Local and direct S3 uploads, export and Immich preserve original bytes.
+- Set independent photo/video count, individual-size and storage limits. New-event
+  totals calculate from count × file size; custom and unlimited totals remain available.
+  Existing overall/session ceilings and exact stored quota values are preserved.
+- Create an Immich album when creating an event, open it from administration, and
+  optionally import new uploads automatically. Durable jobs coalesce bursts and recover
+  after restart; failed imports support manual retry. Immich copies remain independent.
+- Sign in using native OIDC, with an Authentik configuration guide, explicit subject/group
+  authorization, or password fallback. Existing sessions and uploads work during IdP outages.
+- Reject cross-class upload spoofing and malformed MP4/MOV ending at the signature boundary.
+- Improve mixed-media terminology, mobile quota editing, operational guidance and release checks.
 
-- Opt-in automatic Immich import per event/target, with durable bounded
-  reconciliation, coalesced jobs and restart recovery. Failed imports still need
-  manual retry. Migration 010 defaults existing bindings to manual-only.
-- Reject truncated MP4/MOV objects ending exactly at the 512-byte sniff boundary
-  without rejecting equivalent prefixes of larger valid objects.
+Upgrade: stop and back up application data before installing. Migrations 010–012 add
+optional automatic import, short-lived OIDC login state and typed quotas. Existing
+bindings remain manual-only, authentication remains password-only unless configured,
+and new typed limits on existing events start unlimited. Existing NULL/custom storage totals are not
+silently calculated. Roll back with the stopped backup and prior image, not by opening
+upgraded data with an older binary.
 
-- Optional Immich album setup during event creation and before any media exists,
-  with persistent background provisioning, retry/restart recovery, and separate
-  public browser URLs. Manual Send/Retry remains available.
-
-- MP4 and QuickTime MOV uploads alongside images, through the existing local/S3,
-  quota, export and Immich pipelines. Original bytes are preserved; no transcoding
-  or playback UI. No database migration or persisted API/schema renaming.
+Limitations: no transcoding, playback/gallery, resumable multipart uploads, guest accounts
+or multiple administrator roles. Use one server per data directory. Signature checks
+are not antivirus/full decoding; export requires a filesystem supporting hard links.
 
 ## [1.0.0] — 2026-09-25
 

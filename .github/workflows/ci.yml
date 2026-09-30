@@ -78,8 +78,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
-      - name: Upgrade and restore populated Phase 4 data in disposable volumes
+      - name: Upgrade and restore populated migration-012 data in disposable volumes
         run: node scripts/smoke-release.mjs
+      - name: Upgrade and restore exact v1.0.0 data
+        run: node scripts/smoke-release.mjs --v1
       - name: Fresh documented local and S3 installations
         run: node scripts/smoke-fresh.mjs
       - name: Native OIDC integration with disposable signed provider
@@ -98,7 +100,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
-      - name: Build release candidate locally, without registry credentials
+      - name: Build simulated stable release locally, without registry credentials
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -107,13 +109,13 @@ jobs:
           push: false
           tags: photodrop:release-test
           build-args: |
-            VERSION=1.0.0-rc.test
+            VERSION=1.1.0
             REVISION=${{ github.sha }}
-      - name: Inspect and run release candidate
+      - name: Inspect and run simulated stable release
         env:
           ARCH: ${{ matrix.arch }}
-        run: sh scripts/verify-image.sh photodrop:release-test 1.0.0-rc.test "$GITHUB_SHA" "linux/$ARCH"
-      - name: Export attested OCI candidate without publishing
+        run: sh scripts/verify-image.sh photodrop:release-test 1.1.0 "$GITHUB_SHA" "linux/$ARCH"
+      - name: Export attested stable OCI build without publishing
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -122,7 +124,7 @@ jobs:
           outputs: type=oci,dest=release-test.tar
           tags: photodrop:release-oci-test
           build-args: |
-            VERSION=1.0.0-rc.test
+            VERSION=1.1.0
             REVISION=${{ github.sha }}
           provenance: mode=max
           sbom: true
@@ -132,4 +134,4 @@ jobs:
         run: |
           mkdir release-oci
           tar -xf release-test.tar -C release-oci
-          node scripts/verify-oci.mjs release-oci "$ARCH" 1.0.0-rc.test "$GITHUB_SHA"
+          node scripts/verify-oci.mjs release-oci "$ARCH" 1.1.0 "$GITHUB_SHA"

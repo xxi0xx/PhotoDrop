@@ -2,7 +2,7 @@
 
 PhotoDrop intentionally lets anyone holding an event link submit images without
 an account. Links may leak or be forwarded; random event IDs are not passwords.
-Guest headers, names, MIME declarations, tokens, and image bodies are untrusted.
+Guest headers, names, MIME declarations, tokens, and media bodies are untrusted.
 Gate 5 bounds anonymous grants and reservations and reduces request/CPU abuse.
 It assumes one application process per data directory and a trusted administrator
 and host. Compromised administrator/storage credentials, hostile host access,
@@ -10,7 +10,7 @@ distributed limits, and full DDoS mitigation are outside this model.
 
 ## Administrator authentication
 
-Password authentication remains the default. Unreleased v1.1 also supports native
+Password authentication remains the default. PhotoDrop 1.1.0 also supports native
 OIDC-only or password+OIDC login with explicit subject/group allowlists. OIDC
 terminates at PhotoDrop and issues the same 12-hour local sessions; public pages
 and uploads have no OIDC dependency. Startup never contacts the provider. See
@@ -33,7 +33,7 @@ The site key is public; keep the secret only in server environment/secret storag
 Configure that hostname in the Turnstile dashboard. PhotoDrop itself need not be
 proxied by Cloudflare. No Worker, sidecar, or Cloudflare storage is required.
 
-After selecting photos, the guest completes verification once to create an
+After selecting files, the guest completes verification once to create an
 upload session. The Go server redeems the token over HTTPS Siteverify and requires
 `success`, the hostname from `PHOTODROP_BASE_URL`, and action `photodrop_upload`.
 Browser claims are never authoritative. Transport has a five-second timeout,
@@ -45,7 +45,7 @@ New sessions fail closed if validation fails or the provider is unavailable.
 Existing valid grants, event/admin browsing, and `/healthz` continue working.
 Enabling Turnstile does not retroactively revoke existing grants. Challenges are
 not repeated for each file, presign refresh, or finalization within a valid grant.
-The script loads only for configured challenge UI after photo selection. Tokens
+The script loads only for configured challenge UI after file selection. Tokens
 stay in page memory until consumed/reset, never URLs, localStorage, SQLite, or logs.
 The server does not send the guest IP to Siteverify. Loading the widget still
 connects the guest's browser to Cloudflare under its privacy terms.
@@ -76,7 +76,7 @@ still finalize after grant expiry if it passes the original content/size checks;
 repeated completion remains idempotent. A local upload admitted before grant
 expiry can finish, subject to the existing event-open policy and upload deadline.
 Retrying after expiry obtains a new grant/verification for failed work and retains
-completed photos. If cleanup has definitively removed a grant or pending attempt,
+completed files. If cleanup has definitively removed a grant or pending attempt,
 its typed 404 response also allows a new grant on retry. Network errors, generic
 404s, server failures, or uncertain finalization keep the existing IDs and attempt
 finalization first. This is page-session recovery, not persistent resumability.
@@ -102,7 +102,7 @@ Legacy sessions expire deterministically at the Unix epoch; ready assets remain
 intact. Legacy local pending rows conservatively reserve 1 GiB until cleanup.
 Back up `/data` before upgrading; rolling back to an older binary is unsupported.
 
-## Independent photo/video policy (unreleased v1.1)
+## Independent photo/video policy
 
 Migration 012 adds independent event photo/video count, file-size and storage limits. Each typed pending row reserves its matching bucket in the same IMMEDIATE transaction as overall/session checks. Local classification uses a bounded signature prefix before reservation. Direct S3 class hints are untrusted, cross-checked against MIME and required to match verified signatures at completion; mismatch never transfers quota. Legacy NULL-class pending rows acquire current typed capacity transactionally before becoming ready. Generic session limits and strict Turnstile validation are unchanged. See [full quota rules](quotas.md).
 
@@ -175,8 +175,8 @@ the request origin when BASE_URL is empty); a same-origin Referer is the fallbac
 Requests with neither Origin nor a same-origin Referer are rejected, including
 scripts: non-browser clients must supply the expected Origin. This blocks browser
 drive-by requests, not an attacker who can set HTTP headers. Admin session/CSRF
-protections remain required. Direct image PUTs go to the object-store origin and
-use its CORS policy; PhotoDrop never proxies those image bodies.
+protections remain required. Direct media PUTs go to the object-store origin and
+use its CORS policy; PhotoDrop never proxies those media bodies.
 
 Login/control JSON is bounded (1 KiB login/logout/delete/refresh/finalization,
 4 KiB session/preparation, 32 KiB event editing); unknown fields and trailing JSON
@@ -193,12 +193,12 @@ Set the correct HTTPS public URL behind TLS termination. See
 
 Security logs record safe categories/scopes for throttling, verification/origin
 rejection, expiry, quota failures, and cleanup. They omit passwords, grant/admin
-session IDs, CSRF/challenge tokens, presigned URLs, storage secrets, and image bodies.
+session IDs, CSRF/challenge tokens, presigned URLs, storage secrets, and media bodies.
 Health reflects the process/database, not provider availability or quota exhaustion.
 S3 bytes reach storage before final verification: malicious clients with a valid
 presign can temporarily exceed declared bytes or upload invalid content. Use
 provider cost controls and carefully scoped credentials; application quotas bound
 accepted reservations, not all pre-verification provider traffic. File sniffing is
-not antivirus or image decoding. There is no public gallery/download, video or
+not antivirus or full media decoding. There is no public gallery/download or
 resumable multipart upload. Export, Immich, QR codes and optional unverified
 contributor labels are described in the current operating guides.

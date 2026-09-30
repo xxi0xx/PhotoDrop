@@ -1,5 +1,7 @@
 # Gate 7 validation record
 
+> Historical validation record; not current product or release status.
+
 Baseline: merged Gate 6 `7014b5bfb6a14265ce0e248e85ceac34881eaeaf`.
 Branch: `codex/gate-7-production-ux`. Validation completed across September
 17–23, 2026. Scope is production UX; no Gate 8 work is included.

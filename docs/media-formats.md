@@ -1,6 +1,6 @@
-# Media formats (unreleased v1.1 work)
+# Media formats
 
-The development branch accepts JPEG, PNG, WebP, GIF, HEIC, HEIF, MP4
+PhotoDrop 1.1.0 accepts JPEG, PNG, WebP, GIF, HEIC, HEIF, MP4
 (`video/mp4`) and QuickTime MOV (`video/quicktime`). v1.0.0 remains image-only.
 Other containers, including WebM, AVI, 3GP and audio-only M4A, are unsupported.
 AVIF remains unsupported. Legacy MOV without a leading `ftyp` is unsupported.

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { photo } from './photo-fixture.mjs';
 import { video } from './video-fixture.mjs';
 
-const baseline = process.argv.includes('--gate7') ? '6b7d046' : '95fbffa29d26b45e2e53f92b2128e4c231a860af'; // Immutable Phase 4 (or older Gate 7) baseline.
+const baseline = process.argv.includes('--v1') ? '4dabc844b5f7e3c223ea84ee80d2e7ccb84b6d01' : 'af3bd7fc9d38a04aaabb51bcd1dce8878980a210'; // Exact v1.0.0 or merged migration-012 baseline.
 const id = `photodrop-release-${randomBytes(5).toString('hex')}`;
 const dir = mkdtempSync(join(tmpdir(), id));
 const oldImage = `${id}:baseline`, image = `${id}:candidate`, toolsImage = `${id}:tools`;
@@ -74,14 +74,14 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 
 try {
   const oldMigrations = execFileSync('git', ['ls-tree','-r','--name-only',baseline,'--','migrations'],{encoding:'utf8'}).trim().split('\n').filter(path=>path.endsWith('.sql'));
-  assert.equal(oldMigrations.length,process.argv.includes('--gate7')?9:11);
+  assert.equal(oldMigrations.length,process.argv.includes('--v1')?9:12);
   execFileSync('git', ['diff', '--exit-code', baseline, '--', ...oldMigrations]);
   const archive = join(dir, 'baseline.tar');
   execFileSync('git', ['archive', '--format=tar', '-o', archive, baseline]);
   console.log(`Building exact baseline ${baseline} and release candidate (no publishing).`);
   docker(['build', '-t', oldImage, '-'], { input: readFileSync(archive), stdio: ['pipe', 'inherit', 'inherit'] });
   const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  docker(['build', '--build-arg', 'VERSION=1.1.0-dev.quotas', '--build-arg', `REVISION=${revision}`, '-t', image, '.'], { stdio: 'inherit' });
+  docker(['build', '--build-arg', 'VERSION=1.1.0', '--build-arg', `REVISION=${revision}`, '-t', image, '.'], { stdio: 'inherit' });
   docker(['build', '--target', 'backend', '-t', toolsImage, '.'], { stdio: 'inherit' });
   // Helpers are compiled only into a disposable test image, never runtime.
   docker(['run', '--name', `${id}-compile`, toolsImage, 'sh', '-ec', 'go build -o /tmp/s3test ./scripts/s3test && go build -o /tmp/releasestate ./scripts/releasestate']);
@@ -89,8 +89,11 @@ try {
   docker(['run', '-d', '--name', objects, '-p', '127.0.0.1:8084:8084', '-p', '127.0.0.1:18094:18094', toolsImage, '/tmp/s3test', '-listen', ':18094', '-origin', base, '-delay', '0s']);
   for (const volume of volumes) docker(['volume', 'create', '--label', `photodrop.release-test=${id}`, volume]);
   await start(oldImage, data); await login();
-  const event = (await call('POST', '/api/admin/events', { name: 'Release recovery', enabled: true, max_assets: 12, max_bytes: 1048576 }, 201)).body.event;
+  const typedFields=['max_photos','max_videos','max_photo_file_bytes','max_video_file_bytes','max_photo_storage_bytes','max_video_storage_bytes'];
+  const typedPolicy = oldMigrations.length === 12 ? {max_photos:500,max_photo_file_bytes:1049,max_photo_storage_bytes:1234567,max_videos:20,max_video_file_bytes:2000,max_video_storage_bytes:40000} : {};
+  const event = (await call('POST', '/api/admin/events', { name: 'Release recovery', enabled: true, max_assets: 12, max_bytes: 1048576, ...typedPolicy }, 201)).body.event;
   assert.equal(event.id, 1);
+  const unlimited = oldMigrations.length === 12 ? (await call('POST','/api/admin/events',{name:'Existing unlimited',enabled:true,max_photos:500,max_photo_file_bytes:1049},201)).body.event : null;
   const localBytes = photo(), sid = await session(event);
   const localResponse = await fetch(base + path(event, sid), { method: 'POST', headers: { Origin: base, 'Content-Type': 'image/png', 'Content-Disposition': 'attachment; filename=local.png' }, body: localBytes });
   assert.equal(localResponse.status, 201); const local = (await localResponse.json()).asset;
@@ -107,13 +110,13 @@ try {
   await prepare(event, remoteSession, photo()); // Preserve one legitimate pending reservation.
   if (localVideo) {
     await prepare(event, remoteSession, videoBytes, 'video/mp4');
-    await prepare(event, remoteSession, photo(), 'application/octet-stream');
   }
+  if (oldMigrations.length < 12) await prepare(event, remoteSession, photo(), 'application/octet-stream');
   const publicBefore = (await call('GET', `/api/public/events/${event.public_id}`, undefined, 200, false)).body;
   const detailBefore = (await call('GET', `/api/admin/events/${event.id}`)).body;
   assert.equal(detailBefore.event.media.photo_count, localVideo ? 3 : 2);
   stop(); const before = state('seed', data);
-  assert.equal(before.assets.filter(a => a.status === 'pending').length, localVideo ? 3 : 1);
+  assert.equal(before.assets.filter(a => a.status === 'pending').length, 2);
   assert.equal(before.schema_migrations.length, oldMigrations.length);
   copyVolume(data, backup);
   const backedUpSession = {cookie, csrf};
@@ -128,17 +131,16 @@ try {
     await call('GET', '/api/admin/session'); await login();
     const detailAfter=(await call('GET', `/api/admin/events/${event.id}`)).body;
     const oldDetail=structuredClone(detailAfter);
-    const typedFields=['max_photos','max_videos','max_photo_file_bytes','max_video_file_bytes','max_photo_storage_bytes','max_video_storage_bytes'];
-    for(const field of typedFields){assert.equal(oldDetail.event[field],null);delete oldDetail.event[field];}
+    if(oldMigrations.length<12) for(const field of typedFields){assert.equal(oldDetail.event[field],null);delete oldDetail.event[field];}
     assert.equal(oldDetail.event.media.photos.ready_count,2);
     assert.equal(oldDetail.event.media.videos.ready_count,localVideo?1:0);
     assert.equal(oldDetail.event.media.photos.pending_count,1);
     assert.equal(oldDetail.event.media.videos.pending_count,localVideo?1:0);
     assert.equal(oldDetail.event.media.ready_count,localVideo?3:2);
-    delete oldDetail.event.media.photos;delete oldDetail.event.media.videos;delete oldDetail.event.media.ready_count;
+    if(oldMigrations.length<12){delete oldDetail.event.media.photos;delete oldDetail.event.media.videos;delete oldDetail.event.media.ready_count;}
     assert.deepEqual(oldDetail,detailBefore);
     const publicAfter=(await call('GET', `/api/public/events/${event.public_id}`, undefined, 200, false)).body;
-    for(const key of ['max_photo_file_size','max_video_file_size']){assert.equal(publicAfter.event[key],publicAfter.event.max_file_size);delete publicAfter.event[key];}
+    if(oldMigrations.length<12) for(const key of ['max_photo_file_size','max_video_file_size']){assert.equal(publicAfter.event[key],publicAfter.event.max_file_size);delete publicAfter.event[key];}
     assert.deepEqual(publicAfter,publicBefore);
     assert.equal((await fetch(base + `/e/${event.public_id}`)).status, 200);
     assert.equal(docker(['exec', app, 'sha256sum', `/data/uploads/e${event.id}_${local.id}`]).split(' ')[0], sha(localBytes));
@@ -148,6 +150,14 @@ try {
     for (const entry of manifest.assets) {
       const expected = entry.photoDropAssetId === local.id ? localBytes : entry.photoDropAssetId === localVideo?.id ? videoBytes : remoteBytes;
       assert.equal(docker(['exec', app, 'sha256sum', `/data/export-${label}/photos/${entry.exportFilename}`]).split(' ')[0], sha(expected));
+    }
+    if(unlimited){
+      const input={name:unlimited.name,description:'Unrelated edit',enabled:true};
+      for(const field of [...typedFields,'max_assets','max_bytes']) input[field]=unlimited[field];
+      const saved=(await call('PUT',`/api/admin/events/${unlimited.id}`,input)).body.event;
+      for(const field of typedFields) assert.equal(saved[field],unlimited[field],'unrelated edit changed quota');
+      const expected=before.events.find(e=>e.id===unlimited.id);
+      expected.description=saved.description;expected.updated_at=saved.updated_at;
     }
     // Runtime policy switches preserve the pre-existing local session, even with
     // a completely unavailable provider and no password in OIDC-only mode.
@@ -167,8 +177,10 @@ try {
     const expected=structuredClone(before);
     expected.schema_migrations=after.schema_migrations;
     if(oldMigrations.length<10)for(const binding of expected.immich_event_imports) binding.auto_import=0;
-    for(const event of expected.events) for(const field of typedFields) event[field]=null;
-    for(const asset of expected.assets){const mime=asset.status==='ready'?asset.mime_type:asset.expected_mime_type;asset.media_class=mime?.startsWith('video/')?'video':mime?.startsWith('image/')?'photo':null;}
+    if(oldMigrations.length<12){
+      for(const event of expected.events) for(const field of typedFields) event[field]=null;
+      for(const asset of expected.assets){const mime=asset.status==='ready'?asset.mime_type:asset.expected_mime_type;asset.media_class=mime?.startsWith('video/')?'video':mime?.startsWith('image/')?'photo':null;}
+    }
     assert.deepEqual(after,expected,'upgrade changed existing application data');
     if(label==='upgrade') copyVolume(data,upgradedBackup);
     console.log(`${label}: health, old/new login, event/public URL, local/S3 hashes, names, quotas, backend identity, pending/ready, migrations and Immich metadata passed.`);

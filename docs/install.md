@@ -4,7 +4,7 @@ Use Docker Engine/Desktop with Compose v2 (`docker compose version`), working
 registry access and persistent local disk. Release targets are Linux amd64/arm64.
 Do not put SQLite on network storage or run two servers on one data directory.
 
-## Before stable images are published
+## Source installation
 
 ```sh
 git clone https://github.com/xxi0xx/PhotoDrop.git
@@ -17,7 +17,7 @@ Single-quote dotenv values containing `$` or `#`. Protect the file (`chmod 600 .
 on Linux). Leave `PHOTODROP_BASE_URL` empty for local HTTP. For public use set the
 exact HTTPS origin, such as `https://drop.example.com`, and configure [HTTPS](reverse-proxy.md).
 
-Password authentication remains the default. This development version also supports
+Password authentication remains the default. PhotoDrop 1.1.0 also supports
 native [OIDC / Authentik](oidc.md): `PHOTODROP_ADMIN_AUTH=oidc` needs no administrator
 password, but requires the public base URL, provider/client configuration and an
 explicit subject/group allowlist. `password+oidc` enables both methods. Configure
@@ -34,20 +34,21 @@ docker compose exec --user 10001 photodrop photodrop version
 Health returns `{"status":"ok"}` after initialization/migrations; it is not a
 continuous remote-storage/Immich check. Source builds report `dev`. Open
 `/admin/login` on the configured origin, sign in, create an event, and save it.
-Set finite photo/byte quotas before public sharing if you need a resource ceiling.
+Set finite photo/video and overall quotas before public sharing if you need a resource ceiling.
 **Share event** copies its link and downloads a QR PNG. Open the link as a guest
-and upload a small supported image.
+and upload a small supported photo or video.
 
-## Released image (only after publication)
+## Published release image
 
 Use Compose/example files from the matching release checkout. Set in `.env`:
 
 ```dotenv
-PHOTODROP_IMAGE=ghcr.io/xxi0xx/photodrop:1.0.0
+PHOTODROP_IMAGE=ghcr.io/xxi0xx/photodrop:1.1.0
 ```
 
 Run `docker compose pull photodrop`, then `docker compose up --no-build --wait -d`.
-The initial image does not exist until the owner completes the release process.
+Use this pin after the matching GitHub Release and GHCR image have been published.
+The source installation above works independently of registry publication.
 Do not use `up --build` with a release image name: it tags a local build with that name.
 
 ## Persistent state and network
