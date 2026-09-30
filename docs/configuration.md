@@ -120,4 +120,8 @@ is **Compose-only**: default `photodrop:local`, or a released GHCR tag/digest.
 
 ## Event upload policy
 
+The administrator editor can calculate typed storage from count × individual
+size, or save a custom/unlimited value. This adds no environment variable or
+persistent mode: only existing explicit integer-byte event fields are saved.
+
 Per-event photo/video count, individual size and storage limits are stored in SQLite, not environment variables. `PHOTODROP_MAX_FILE_SIZE` remains the hard server ceiling. See [event limits and API fields](quotas.md) for independent buckets, overall safety ceilings and generic upload-session limits.

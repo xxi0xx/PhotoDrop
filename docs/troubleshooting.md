@@ -27,8 +27,8 @@ expanded Compose configuration or environment dumps: they can contain secrets.
 | Wrong guest links | BASE_URL must be the exact public origin, no subpath; recreate app after changing environment |
 | CSRF/origin rejection | Use the configured origin, preserve Origin/Referer through proxy; admin needs session and CSRF token; never disable checks |
 | Everyone shares rate limit | Check actual socket peer and controlled XFF chain; trust only real proxy CIDRs, not all networks |
-| Closed event | Enable state/expiration/quota; expiration never deletes originals; public link remains stable |
-| Quota reached | Ready plus pending reservations count; review limits and stale cleanup, which can wait on old storage credentials |
+| Closed event | Enable state/expiration; expiration never deletes originals; public link remains stable |
+| Quota reached | Ready plus pending reservations count; review typed/overall/session limits and stale cleanup, which can wait on old storage credentials |
 | S3 authorization failure | Scoped permissions, correct region/endpoint/path style, expired credentials, clock and conditional PUT support |
 | Browser S3 PUT fails | Exact CORS origin, PUT method, Content-Type and If-None-Match headers, HTTPS, expiry; inspect without sharing signed URL |
 | Historical backend unavailable | Restore matching named credentials/configuration; never repoint an existing backend key |

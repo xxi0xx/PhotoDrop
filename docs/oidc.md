@@ -1,4 +1,4 @@
-# Native OIDC administrator sign-in (unreleased v1.1)
+# Native OIDC administrator sign-in
 
 PhotoDrop is the OpenID Connect relying party. The browser visits the provider
 once during sign-in, returns to PhotoDrop, and receives PhotoDrop's normal local
@@ -152,7 +152,7 @@ password in a password-enabled mode. Do not edit tokens or invent a user table.
   query strings; PhotoDrop itself logs only generic login outcomes.
 
 See [configuration](configuration.md), [upgrade](upgrading.md), and
-[backup/restore](backup-restore.md), plus the [validation record](v11-phase4-validation.md).
+[backup/restore](backup-restore.md), plus the [historical OIDC validation record](v11-phase4-validation.md).
 No Authentik forward-auth, guest OIDC,
 token refresh, provider logout propagation or separate authentication container
 is required by PhotoDrop.

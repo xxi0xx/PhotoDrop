@@ -71,7 +71,7 @@ byte count is checked, the file is synced/closed, and a hard link atomically
 publishes it without replacing an existing destination. The temporary name is
 then removed. This requires a destination filesystem with hard-link support
 (for example ext4, APFS, or NTFS); unsupported filesystems fail safely. You can
-copy a completed export to another filesystem afterward. No full photo is
+copy a completed export to another filesystem afterward. No full media file is
 buffered in RAM.
 
 On the first failure, the command exits nonzero and identifies the asset ID.
@@ -205,7 +205,7 @@ and [official API documentation](https://docs.immich.app/api/).
 
 ## Albums, jobs, and recovery
 
-Unreleased v1.1: **New event** offers optional **Create an Immich album for this
+**New event** offers optional **Create an Immich album for this
 event** when known targets exist. The album name follows the event name until
 you edit it. Choose a target and save: one SQLite transaction creates the event,
 binding, random album marker, and durable job. The HTTP request performs no
@@ -219,7 +219,7 @@ This selects no media, including files arriving while setup runs. Automatic impo
 is opt-in and defaults off; otherwise use **Send to Immich**. Without optional
 setup, event creation is unchanged.
 
-### Automatic import (unreleased v1.1)
+### Automatic import
 
 Select **Automatically send new uploads to Immich** during optional event setup,
 or toggle it on an existing event/target binding. Each target has its own setting.
@@ -276,7 +276,7 @@ For manual imports, open the existing Immich panel, test the target connection,
 optionally change the initial album name, then send unimported media. A protected
 POST commits a SQLite job and returns HTTP 202. The existing Go process runs one
 job at a time with at most **three concurrent uploads**, then persists progress
-for each photo. The page polls every two seconds; leaving the page does not stop
+for each file. The page polls every two seconds; leaving the page does not stop
 the job. Transfers stream local/S3 bodies through `io.Pipe` multipart requests
 directly to Immich. No full-file staging or PhotoDrop content-hash system is used.
 
@@ -303,7 +303,7 @@ remote asset ID, attempt count, safe error, and timestamps. States are `pending`
 is saved **before** album assignment. If assignment fails, retry only adds that
 known ID to the album. Successful/duplicate records are never reuploaded during
 an ordinary retry. New sends discover newly ready assets; failed-only retries
-exclude new photos. Previously cancelled pending work is included in a new send.
+exclude new files. Previously cancelled pending work is included in a new send.
 
 Immich returns `created` or `duplicate` with a remote asset ID. A lost upload
 response leaves its outcome unresolved; the next retry streams it again and
@@ -348,7 +348,7 @@ to upload the resulting `photos/` directory. Follow that CLI version's setup and
 permission requirements. PhotoDrop does not invoke it or include Node.js in its
 production container. Export has no Immich dependency.
 
-Unreleased MP4/MOV support preserves original video bytes through export and
+MP4/MOV support preserves original video bytes through export and
 Immich import; see [media formats](media-formats.md). There is no gallery/public
 download, transcoding, playback UI, media migration or EXIF processing. QR sharing and optional contributor names are available in the
 [guest UX](production-ux.md). Completed

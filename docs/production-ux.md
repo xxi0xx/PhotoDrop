@@ -11,16 +11,16 @@ on signage, and scan a sample at the intended printed size before distribution.
 
 The QR contains only the public link: no administrator credentials, upload
 secrets, verification tokens, or contributor names. Treat it like sharing the
-link itself. Disabling or expiring an event closes photo sharing without changing
+link itself. Disabling or expiring an event closes guest uploads without changing
 its public ID, link, or QR. Re-enabling the same event reuses that link. Changing
 the deployment's public base URL requires sharing a newly generated QR.
 
 ## Guest uploads and names
 
 Guests need no account. **Your name** is optional and helps the host recognize
-who supplied photos. It is an unverified label, not authenticated identity or
+who supplied files. It is an unverified label, not authenticated identity or
 public profile information. The host sees attribution in the protected event
-summary; other guests cannot browse contributor names or photos.
+summary; other guests cannot browse contributor names or files.
 
 Names accept Unicode and ordinary accents. Surrounding whitespace is trimmed;
 blank input is anonymous. The server rejects internal control characters and
@@ -31,26 +31,26 @@ verification tokens in localStorage/sessionStorage.
 
 Attribution is fixed when a batch creates its upload session and copied into
 each asset record. Changing the name for a later batch never rewrites earlier
-photos. Cleanup of expired sessions does not erase asset attribution. Existing
-photos from before Gate 7 remain anonymous. The admin summary groups completed
-photos by their supplied name and shows at most 100 groups; equal names do not
+files. Cleanup of expired sessions does not erase asset attribution. Existing
+files from before contributor attribution was added remain anonymous. The admin summary groups completed
+files by their supplied name and shows at most 100 groups; equal names do not
 prove the same person. Technical logs do not include contributor names.
 
 ## Selection, progress, and recovery
 
-Choose up to 100 photos per selection. The page shows filenames, total size,
-unsupported/oversize files, overall progress, and individual photo status.
+Choose up to 100 files per selection. The page shows filenames, total size,
+unsupported/oversize files, overall progress, and individual file status.
 The server still enforces file validation, session limits, event availability,
-and quotas. The supported formats and configured per-photo limit appear beside
+and quotas. The supported formats and configured photo/video limits appear beside
 the chooser. No thumbnails or gallery are generated.
 
-Keep the page open while sending photos. A supported browser warns before
+Keep the page open while sending files. A supported browser warns before
 leaving during active uploads. Success moves to **Thanks for sharing**, without
-leaving progress bars at 100%. **Add more photos** starts another selection and
+leaving progress bars at 100%. **Add more files** starts another selection and
 keeps the entered name available for editing.
 
 If some files fail, the successful ones stay complete. **Retry failed** operates
-only on failed photos. Adding a new selection during partial success also keeps
+only on failed files. Adding a new selection during partial success also keeps
 the existing completed and uncertain attempts. A temporary rate limit disables
 upload/retry until `Retry-After` permits another attempt; there is no retry loop.
 Quota messages direct guests to the host rather than exposing storage details.
@@ -68,9 +68,9 @@ in-memory selection/recovery state; this is not a resumable-upload feature.
 The event page separates **Event**, **Share event**, **Guest uploads**,
 **Immich**, **Export**, and **Danger zone**. Guest uploads shows completed counts,
 storage, pending reservations when present, optional quotas, and attribution.
-Refresh photo counts updates those summaries without discarding unsaved edits.
+Refresh file counts updates those summaries without discarding unsaved edits.
 
-Immich keeps the existing connection, new-photo import, failed retry, cancellation,
+Immich keeps the existing connection, new-file import, failed retry, cancellation,
 and recovery operations. Export remains CLI-first with a copyable command;
 choose a new writable output directory each time. See the existing
 [export/Immich guide](export-immich.md). Deleting a PhotoDrop event does not delete
@@ -80,6 +80,12 @@ Migration `009_contributors.sql` adds nullable names to upload sessions/assets.
 Migrations 001–008 are unchanged. Normal deployment still uses one PhotoDrop
 container plus `/data`, with optional external storage/Immich configured as before.
 
-## Independent photo/video limits (unreleased v1.1)
+## Independent photo/video limits
+
+New-event total storage follows count × individual size separately for photos
+and videos. Manually changing a total selects custom mode; clearing it means
+unlimited. **Use calculated maximum** restores the link. Existing NULL/custom
+totals are preserved, while exact formula-equal values reopen linked. Labels and
+text identify the mode without color or repeated live announcements.
 
 Guest uploads in the event editor has separate Photo limits and Video limits panels with ready/pending counts, storage, and individual-file limits. Overall ceilings are secondary. Blank means unlimited at that scope; unchanged MiB/GiB displays preserve exact byte values. Typed limit notices include pending reservations. Guests receive effective typed file limits for preflight, without private usage counts. See [event quotas](quotas.md).

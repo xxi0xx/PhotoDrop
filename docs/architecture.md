@@ -46,8 +46,12 @@ the partial unique active-job index is the final concurrency guard. Later upload
 remain discoverable without in-memory notifications, including after restart.
 Failed selections require manual retry; failed provisioning is never automatically
 retried. Upload HTTP handlers do not call or wait for Immich. See the
-[operating semantics](export-immich.md#automatic-import-unreleased-v11).
+[operating semantics](export-immich.md#automatic-import).
 
 ## Typed upload reservations
+
+The editor's automatic/custom storage state is transient. It computes an integer
+count × integer file-size product and sends the existing explicit byte fields.
+The server has no formula mode and always enforces persisted limits transactionally.
 
 Migration 012 adds optional event photo/video quotas and durable asset `media_class`. Local uploads sniff a bounded prefix before the transactional reservation; direct S3 reserves an untrusted class that final signature verification must match. Asset rows account for ready actual bytes and pending reserved bytes across all backends. Unknown historical reservations acquire typed capacity atomically on completion. See [quota architecture and compatibility](quotas.md).

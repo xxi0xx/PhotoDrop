@@ -104,7 +104,7 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           printf 'Container: `%s@%s`\n\n' "$IMAGE" "$DIGEST" > release-notes.md
-          cat CHANGELOG.md >> release-notes.md
+          node scripts/release-notes.mjs "$VERSION" CHANGELOG.md >> release-notes.md
           args=()
           if [ "$PRERELEASE" = true ]; then args+=(--prerelease --latest=false); fi
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "PhotoDrop $VERSION" --notes-file release-notes.md "${args[@]}"

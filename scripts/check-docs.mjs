@@ -2,8 +2,15 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, dirname, extname, relative } from 'node:path';
 import assert from 'node:assert/strict';
+import { releaseLanguageErrors, historicalDocs } from './release-language.mjs';
 const root = process.cwd();
 const files = [...readdirSync(root).filter(f => f.endsWith('.md')), ...readdirSync('docs').filter(f => f.endsWith('.md')).map(f => `docs/${f}`)];
+function sourceFiles(dir) {
+  return readdirSync(dir, {withFileTypes:true}).flatMap(entry => entry.isDirectory() ? sourceFiles(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`]);
+}
+const currentFiles = [...files, 'Dockerfile', '.env.example', '.env.backends.example', 'compose.yml', 'compose.backends.yml', ...sourceFiles('web/src')];
+for (const file of currentFiles) assert.deepEqual(releaseLanguageErrors(file, readFileSync(file, 'utf8')), [], `${file}: stale release language`);
+console.log(`Current release-language check passed; ${historicalDocs.size} explicitly marked historical records excluded.`);
 let links = 0;
 function anchors(text) {
   const counts = new Map();

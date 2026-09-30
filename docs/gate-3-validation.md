@@ -1,5 +1,7 @@
 # Gate 3 validation
 
+> Historical validation record; not current product or release status.
+
 Validated on 2026-09-11 on Windows and in Linux Docker containers.
 
 ## Automated checks

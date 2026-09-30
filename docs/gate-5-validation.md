@@ -1,5 +1,7 @@
 # Gate 5 validation record
 
+> Historical validation record; not current product or release status.
+
 Historical implementation-time record. The owner later completed
 [live R2 and production Turnstile validation](live-validation.md) and enabled
 private vulnerability reporting on 2026-09-24 (America/Chicago).

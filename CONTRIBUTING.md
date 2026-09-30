@@ -55,7 +55,8 @@ retains browser fixtures; remove only that test project's data afterward.
 The fresh-install smoke copies only public Git-visible files into a temporary
 directory, uses empty local/S3 state and an ephemeral password, and cleans its own
 project. Its test-only overlay needs Compose 2.24.4+ for reset/override tags.
-The release smoke builds exact merged v1.1 Phase 3 source and the candidate, seeds
+The release smoke builds exact merged migration-012 source (or v1.0.0 with
+`--v1`) and the current source, seeds
 local/S3 and completed Immich metadata, then tests a stopped backup, upgrade and
 destructive restore using uniquely named disposable volumes. Neither reads the
 developer `.env` or mounts production data.

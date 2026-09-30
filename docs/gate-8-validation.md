@@ -1,5 +1,7 @@
 # Gate 8 release preparation validation
 
+> Historical validation record; not current product or release status.
+
 Baseline: merged Gate 7 `6b7d046f16d8093246996f1f6587daa281089ceb` (PR #8). Branch:
 `codex/gate-8-community-release`. First intended stable version: `v1.0.0`.
 No stable tag, GitHub Release or production image is published by this task.

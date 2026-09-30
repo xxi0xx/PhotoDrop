@@ -1,5 +1,7 @@
 # Gate 6 validation record
 
+> Historical validation record; not current product or release status.
+
 Baseline: merged Gate 5 commit `7b3a915536b01a4991a9a00aef5bfd641757497e`.
 Branch: `codex/gate-6-export-immich`. Scope is portable export and optional native
 Immich integration. No Gate 7 functionality is included.

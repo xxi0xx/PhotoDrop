@@ -1,10 +1,10 @@
 # Storage modes
 
-`PHOTODROP_STORAGE_PROVIDER=local` is the default. Guests stream images through
-PhotoDrop into `/data/uploads`; Gate 3's limits, permissions, and cleanup apply.
+`PHOTODROP_STORAGE_PROVIDER=local` is the default. Guests stream media through
+PhotoDrop into `/data/uploads`; bounded streaming, permissions and cleanup apply.
 
-`PHOTODROP_STORAGE_PROVIDER=s3` changes the path for new images: PhotoDrop accepts
-small JSON control requests; the browser PUTs each image directly to the private
+`PHOTODROP_STORAGE_PROVIDER=s3` changes the path for new files: PhotoDrop accepts
+small JSON control requests; the browser PUTs each file directly to the private
 object-store origin. PhotoDrop verifies the object before marking it ready.
 The normal deployment remains one PhotoDrop container and one `/data` volume
 for SQLite and any historical local files. No SDK is added to the browser.
@@ -125,7 +125,7 @@ Let `P` be `/api/public/events/{public_id}/upload-sessions/{session_id}/assets`.
 | `POST P/prepare` | Accepts `filename`, `size`, `content_type`, and a 32-hex `request_id`; persists a pending S3 asset before returning its ID and PUT plan. |
 | `POST P/{asset_id}/authorize` with `{}` | Refreshes authorization for the same pending asset/key; requires an open event. |
 | `POST P/{asset_id}/complete` with `{}` | Independently verifies the object and returns ready metadata. Repeating completion returns the same asset. |
-| `POST P` with a raw image | Existing local-only upload path; rejects image bodies in S3 mode. |
+| `POST P` with raw media | Existing local-only upload path; rejects media bodies in S3 mode. |
 
 Plans contain `strategy`, `method`, `url`, `headers`, and `expires_at`. The browser
 sends the File directly to that URL, with exactly the returned headers, then
@@ -158,7 +158,7 @@ immutable expected metadata remain for retry. If verification or its final
 database transaction fails transiently, existing bytes remain for retry.
 Concurrent finalizers serialize per asset; SQLite write transactions are short
 and never span remote I/O. Admin totals show verified `ready` assets, with pending
-photo/byte reservations shown separately. Both count toward security quotas.
+file/byte reservations shown separately. Both count toward security quotas.
 
 An ambiguous PUT first triggers completion. If the object is valid, it completes
 without another upload. If it is missing/invalid, the client refreshes the same
@@ -167,13 +167,13 @@ finalizes first. A lost completion response therefore does not duplicate assets.
 The attempt lives in the current page session; there is no permanent resumability.
 
 New preparation and refresh require an open event. A previously authorized,
-valid pending image may finish after disable/expiration. Deleting events cannot
+valid pending media may finish after disable/expiration. Deleting events cannot
 finalize or issue new authorization. An already-issued URL cannot be revoked.
 
 A presigned PUT does **not** enforce a portable pre-storage body-size limit.
 Oversize declarations are rejected before signing; oversized actual objects are
 rejected/deleted during completion. An abusive client can still consume storage
-before verification. Gate 5 limits grants, preparations, and expected-byte
+before verification. PhotoDrop limits grants, preparations, and expected-byte
 reservations; it cannot prevent this pre-verification object-store cost.
 
 ## Cleanup and provider switching
@@ -187,7 +187,7 @@ budget; no bucket listing or separate worker service is used.
 
 Event deletion dispatches using each asset's durable backend record. It removes media
 before removing the corresponding metadata; partial failures keep the event
-closed and retryable, matching Gate 3. Each retired S3 key is first recorded in
+closed and retryable, matching local cleanup semantics. Each retired S3 key is first recorded in
 `s3_cleanup`, independently of event cascades. Because old URLs or uploads already
 in flight can recreate a deleted object, startup also rechecks up to 1,000 retired
 keys last checked more than an hour ago. Periodic cleanup repeats this check.
@@ -201,7 +201,7 @@ for every historical backend that still needs operations. Reusing a key with
 different addressing metadata fails startup; select a new key instead. No media
 is copied. With missing historical credentials, pages/counts/health still work,
 but deletion remains incomplete until credentials are restored. See [durable
-backend identity and Gate 4 upgrade instructions](storage-backends.md).
+backend identity and upgrade instructions](storage-backends.md).
 
 Use one PhotoDrop instance per data directory. Keep backups of `/data`, and use
 your provider's backup/versioning policy for remote media; a SQLite backup alone
