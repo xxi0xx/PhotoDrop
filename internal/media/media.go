@@ -37,9 +37,10 @@ func New(db *sql.DB, objects storage.Store, logger *slog.Logger) *Service {
 	return &Service{db: db, events: events.New(db), storage: objects, logger: logger, backends: storage.LocalBackends(), security: config.Security{}.Defaults(), fileCeiling: config.DefaultMaxFileSize}
 }
 
-// ConfigureBackends is called once during startup, before cleanup or requests.
+// ConfigureFileLimit sets the server ceiling before cleanup or requests.
 func (s *Service) ConfigureFileLimit(limit int64) { s.fileCeiling = limit }
 
+// ConfigureBackends is called once during startup, before cleanup or requests.
 func (s *Service) ConfigureBackends(backends *storage.Backends) { s.backends = backends }
 func (s *Service) Strategy() string {
 	if s.backends.ActiveID != 1 {

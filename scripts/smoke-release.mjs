@@ -67,8 +67,8 @@ async function session(event) {
   return (await call('POST', `/api/public/events/${event.public_id}/upload-sessions`, { contributor_name: 'Release María 王' }, 201, false)).body.upload_session.id;
 }
 const path = (event, sid) => `/api/public/events/${event.public_id}/upload-sessions/${sid}/assets`;
-async function prepare(event, sid, bytes) {
-  return (await call('POST', path(event, sid) + '/prepare', { filename: 'remote.png', content_type: 'image/png', size: bytes.length, request_id: randomBytes(16).toString('hex') }, 201, false)).body;
+async function prepare(event, sid, bytes, kind = 'image/png') {
+  return (await call('POST', path(event, sid) + '/prepare', { filename: 'remote.png', content_type: kind, size: bytes.length, request_id: randomBytes(16).toString('hex') }, 201, false)).body;
 }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 
@@ -105,11 +105,15 @@ try {
   assert.equal((await fetch(remote.upload.url, { method: 'PUT', headers: remote.upload.headers, body: remoteBytes })).status, 200);
   await call('POST', path(event, remoteSession) + `/${remote.asset.id}/complete`, {}, 200, false);
   await prepare(event, remoteSession, photo()); // Preserve one legitimate pending reservation.
+  if (localVideo) {
+    await prepare(event, remoteSession, videoBytes, 'video/mp4');
+    await prepare(event, remoteSession, photo(), 'application/octet-stream');
+  }
   const publicBefore = (await call('GET', `/api/public/events/${event.public_id}`, undefined, 200, false)).body;
   const detailBefore = (await call('GET', `/api/admin/events/${event.id}`)).body;
   assert.equal(detailBefore.event.media.photo_count, localVideo ? 3 : 2);
   stop(); const before = state('seed', data);
-  assert.equal(before.assets.filter(a => a.status === 'pending').length, 1);
+  assert.equal(before.assets.filter(a => a.status === 'pending').length, localVideo ? 3 : 1);
   assert.equal(before.schema_migrations.length, oldMigrations.length);
   copyVolume(data, backup);
   const backedUpSession = {cookie, csrf};
@@ -128,6 +132,8 @@ try {
     for(const field of typedFields){assert.equal(oldDetail.event[field],null);delete oldDetail.event[field];}
     assert.equal(oldDetail.event.media.photos.ready_count,2);
     assert.equal(oldDetail.event.media.videos.ready_count,localVideo?1:0);
+    assert.equal(oldDetail.event.media.photos.pending_count,1);
+    assert.equal(oldDetail.event.media.videos.pending_count,localVideo?1:0);
     assert.equal(oldDetail.event.media.ready_count,localVideo?3:2);
     delete oldDetail.event.media.photos;delete oldDetail.event.media.videos;delete oldDetail.event.media.ready_count;
     assert.deepEqual(oldDetail,detailBefore);
