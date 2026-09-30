@@ -2,7 +2,7 @@
 
 PhotoDrop intentionally lets anyone holding an event link submit images without
 an account. Links may leak or be forwarded; random event IDs are not passwords.
-Guest headers, names, MIME declarations, tokens, and image bodies are untrusted.
+Guest headers, names, MIME declarations, tokens, and media bodies are untrusted.
 Gate 5 bounds anonymous grants and reservations and reduces request/CPU abuse.
 It assumes one application process per data directory and a trusted administrator
 and host. Compromised administrator/storage credentials, hostile host access,
@@ -175,8 +175,8 @@ the request origin when BASE_URL is empty); a same-origin Referer is the fallbac
 Requests with neither Origin nor a same-origin Referer are rejected, including
 scripts: non-browser clients must supply the expected Origin. This blocks browser
 drive-by requests, not an attacker who can set HTTP headers. Admin session/CSRF
-protections remain required. Direct image PUTs go to the object-store origin and
-use its CORS policy; PhotoDrop never proxies those image bodies.
+protections remain required. Direct media PUTs go to the object-store origin and
+use its CORS policy; PhotoDrop never proxies those media bodies.
 
 Login/control JSON is bounded (1 KiB login/logout/delete/refresh/finalization,
 4 KiB session/preparation, 32 KiB event editing); unknown fields and trailing JSON
@@ -193,12 +193,12 @@ Set the correct HTTPS public URL behind TLS termination. See
 
 Security logs record safe categories/scopes for throttling, verification/origin
 rejection, expiry, quota failures, and cleanup. They omit passwords, grant/admin
-session IDs, CSRF/challenge tokens, presigned URLs, storage secrets, and image bodies.
+session IDs, CSRF/challenge tokens, presigned URLs, storage secrets, and media bodies.
 Health reflects the process/database, not provider availability or quota exhaustion.
 S3 bytes reach storage before final verification: malicious clients with a valid
 presign can temporarily exceed declared bytes or upload invalid content. Use
 provider cost controls and carefully scoped credentials; application quotas bound
 accepted reservations, not all pre-verification provider traffic. File sniffing is
-not antivirus or image decoding. There is no public gallery/download, video or
+not antivirus or full media decoding. There is no public gallery/download or
 resumable multipart upload. Export, Immich, QR codes and optional unverified
 contributor labels are described in the current operating guides.
