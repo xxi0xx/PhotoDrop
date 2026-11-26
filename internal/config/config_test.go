@@ -99,7 +99,10 @@ func TestValidation(t *testing.T) {
 		{"PHOTODROP_MAX_FILE_SIZE", "0", false},
 		{"PHOTODROP_MAX_FILE_SIZE", "-1", false},
 		{"PHOTODROP_MAX_FILE_SIZE", "50MB", false},
-		{"PHOTODROP_MAX_FILE_SIZE", "1073741825", false},
+		{"PHOTODROP_MAX_FILE_SIZE", "2147483649", false},
+		{"PHOTODROP_MAX_FILE_SIZE", "1073741825", true},
+		{"PHOTODROP_MAX_FILE_SIZE", "2000000000", true},
+		{"PHOTODROP_MAX_FILE_SIZE", "2147483648", true},
 		{"PHOTODROP_MAX_FILE_SIZE", "52428800", true},
 	} {
 		t.Run(tt.key+"/"+tt.value, func(t *testing.T) {

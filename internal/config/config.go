@@ -8,9 +8,18 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const DefaultMaxFileSize int64 = 50 * 1024 * 1024
+
+// MaxFileSizeLimit is the largest accepted PHOTODROP_MAX_FILE_SIZE (2 GiB). Each
+// file is still one request, so it stays below S3/R2 single-PUT limits.
+const MaxFileSizeLimit int64 = 2 * 1024 * 1024 * 1024
+
+// TransferTimeout bounds one file transfer: a guest upload, an object-store read
+// stream or an Immich upload. Keep it below media cleanup's one-hour pending cutoff.
+const TransferTimeout = 30 * time.Minute
 
 type Config struct {
 	ListenAddr        string
@@ -52,8 +61,8 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 
 	if value, ok := lookup("PHOTODROP_MAX_FILE_SIZE"); ok {
 		size, err := strconv.ParseInt(value, 10, 64)
-		if err != nil || size < 1 || size > 1024*1024*1024 || strings.Trim(value, "0123456789") != "" {
-			return Config{}, fmt.Errorf("PHOTODROP_MAX_FILE_SIZE must be an integer byte count from 1 to 1073741824")
+		if err != nil || size < 1 || size > MaxFileSizeLimit || strings.Trim(value, "0123456789") != "" {
+			return Config{}, fmt.Errorf("PHOTODROP_MAX_FILE_SIZE must be an integer byte count from 1 to %d", MaxFileSizeLimit)
 		}
 		cfg.MaxFileSize = size
 	}

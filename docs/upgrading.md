@@ -18,6 +18,13 @@ Use the same overlays throughout. Check logs privately, sign in, verify an exist
 event/public link/counts, then test upload/export. Startup validates checksums and
 applies new migrations transactionally.
 
+## v1.1.0 to v1.2.0
+
+No migrations; data and configuration are unchanged. 1.2.0 accepts
+`PHOTODROP_MAX_FILE_SIZE` up to 2147483648 (2 GiB) and allows 30 minutes per file
+transfer. Raise the value only after the 1.2.0 image is running: 1.1.0 refuses to
+start with a value above 1073741824. Rollback to 1.1.0 needs a value within its limit.
+
 ## v1.0.0 to v1.1.0
 
 Migration 010 adds automatic Immich import state:
@@ -45,8 +52,8 @@ and old image, verify, then switch traffic. Schema rollback cannot undo remote d
 
 | Image reference | Meaning |
 | --- | --- |
-| `ghcr.io/xxi0xx/photodrop:1.1.0` | Full release tag; workflow refuses overwrite |
-| `:1.1` | Moving stable patch line |
+| `ghcr.io/xxi0xx/photodrop:1.2.0` | Full release tag; workflow refuses overwrite |
+| `:1.2` | Moving stable patch line |
 | `:1` | Moving stable major line |
 | `:latest` | Most recently promoted stable release, never prerelease |
 | `:1.2.0-rc.1` | Exact prerelease, no moving aliases |
