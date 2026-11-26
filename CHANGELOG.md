@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-11-26
+
+- Raise the `PHOTODROP_MAX_FILE_SIZE` ceiling from 1 GiB to 2 GiB (2147483648 bytes).
+  Each file is still one request, within S3/R2 single-upload limits.
+- Allow 30 minutes per file transfer instead of 10: guest uploads, object-store reads
+  for export/Immich and Immich uploads. Pending-upload cleanup still waits one hour.
+
+Upgrade: no migrations. Existing configuration keeps working; values above 1 GiB
+require this version. Presigned upload URLs still follow `PHOTODROP_S3_PRESIGN_TTL`;
+validate a long direct upload against your provider before relying on it. The default
+5 GiB upload-session total and lower per-event limits still apply.
+
 ## [1.1.0] — 2026-09-30
 
 - Collect MP4 and QuickTime MOV videos alongside JPEG, PNG, WebP, GIF, HEIC and
