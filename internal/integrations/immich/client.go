@@ -61,7 +61,7 @@ func NewClient(cfg config.Immich) (*Client, error) {
 	if err != nil || cfg.APIKey == "" {
 		return nil, ErrCredentials
 	}
-	return &Client{base: base + "/api", key: cfg.APIKey, http: &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &Client{base: base + "/api", key: cfg.APIKey, http: &http.Client{Timeout: config.TransferTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 // Responses/errors are bounded and never propagated verbatim. Transport errors
@@ -196,7 +196,7 @@ func (c *Client) AddToAlbum(ctx context.Context, albumID, assetID string) error 
 // Upload streams multipart media directly from the provider with fixed buffers.
 // No checksum prepass or local staging: Immich computes its own content hash.
 func (c *Client) Upload(ctx context.Context, filename, uploadedAt string, size int64, source io.Reader) (Upload, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, config.TransferTimeout)
 	defer cancel()
 	reader, writer := io.Pipe()
 	multi := multipart.NewWriter(writer)

@@ -1,13 +1,13 @@
 # Release policy
 
-PhotoDrop **1.1.0** is the current documented version. Git SemVer tags are authoritative;
+PhotoDrop **1.2.0** is the current documented version. Git SemVer tags are authoritative;
 the private frontend package has no competing application version. Untagged
 builds default to `dev`. `photodrop version` / `--version` works without credentials
 or opening the database. Release builds inject the version without `v` and commit:
 
 ```sh
 CGO_ENABLED=0 go build -trimpath -buildvcs=false \
-  -ldflags="-s -w -X photodrop/internal/buildinfo.Version=1.1.0 -X photodrop/internal/buildinfo.Commit=$(git rev-parse HEAD)" \
+  -ldflags="-s -w -X photodrop/internal/buildinfo.Version=1.2.0 -X photodrop/internal/buildinfo.Commit=$(git rev-parse HEAD)" \
   -o bin/photodrop ./cmd/photodrop
 ```
 
@@ -16,14 +16,15 @@ metadata. Version is CLI-local, not a new unauthenticated details endpoint.
 
 ## Post-merge owner procedure
 
-1. Merge the 1.1.0 readiness PR and wait for main CI and the Immich workflow.
-2. Review the [1.1.0 validation record](v1.1.0-validation.md), changelog, backup
-   requirements and known limitations. Confirm the intended merged commit.
-3. Deliberately create `v1.1.0` on that main commit and push that tag. The tag is
-   the owner's publication action; a source checkout or readiness PR does not
+1. Merge the version's release PR (changelog section, version references) and wait
+   for main CI and the Immich workflow.
+2. Review the changelog, backup requirements and known limitations (for 1.1.0, the
+   [validation record](v1.1.0-validation.md)). Confirm the intended merged commit.
+3. Deliberately create the tag (for example `v1.2.0`) on that main commit and push it.
+   The tag is the owner's publication action; a source checkout or release PR does not
    imply that a matching registry image exists.
-4. Wait for artifact verification, then confirm the immutable `1.1.0` image,
-   stable `1.1`, `1`, `latest` aliases and GitHub Release. Verify public pull access.
+4. Wait for artifact verification, then confirm the immutable `1.2.0` image,
+   stable `1.2`, `1`, `latest` aliases and GitHub Release. Verify public pull access.
 
 The first stable version, v1.0.0, was published on 2026-09-25. Its earlier
 [publication incident](v1.0.0-release-history.md) is historical evidence, not a
@@ -46,7 +47,7 @@ There is no pull_request_target, secret forwarding to PRs, or custom signing sch
 Release-sensitive actions are pinned to resolved immutable upstream commits.
 
 Buildx cross-compiles CGO-free binaries for linux/amd64 and linux/arm64, builds the
-minimal runtime, and publishes `ghcr.io/xxi0xx/photodrop:1.1.0` first. OCI source,
+minimal runtime, and publishes the immutable version tag (for example `ghcr.io/xxi0xx/photodrop:1.2.0`) first. OCI source,
 revision, version, title and description labels identify the artifact. The license
 label is `Apache-2.0`; the canonical LICENSE is included in the runtime image.
 Runtime and OCI checks require the expected license label; runtime checks also
@@ -62,7 +63,7 @@ per required platform, and pulls/runs each by its distinct child digest. This av
 Docker reusing one local index-digest reference for two architectures. Checks cover
 the actual platform, CLI version, labels,
 health, UID 10001, data permissions, minimal runtime, and SIGTERM. Only then are
-stable aliases `1.1`, `1`, `latest` promoted and a GitHub Release created. A prerelease
+stable aliases (`1.2`, `1`, `latest`) promoted and a GitHub Release created. A prerelease
 such as `1.2.0-rc.1` gets no moving aliases and a prerelease GitHub Release.
 
 If publication fails after the immutable image was pushed, no successful GitHub

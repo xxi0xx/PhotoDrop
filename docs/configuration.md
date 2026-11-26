@@ -18,7 +18,7 @@ application defaults. Empty required values fail startup.
 | `PHOTODROP_BASE_URL` | empty | HTTP(S) origin, optional trailing slash, no subpath/userinfo/query/fragment | Public; links, origin checks, secure cookies/HSTS |
 | `PHOTODROP_ADMIN_AUTH` | `password` | Exact `password`, `oidc`, or `password+oidc`; selects enabled login methods | Policy |
 | `PHOTODROP_ADMIN_PASSWORD` | Required in `password` and `password+oidc`; ignored in `oidc` | 12–72 bytes, not whitespace-only, no NUL; change + restart in a password-enabled mode revokes all local sessions | Secret |
-| `PHOTODROP_MAX_FILE_SIZE` | `52428800` | Integer bytes 1–1073741824 | Public limit |
+| `PHOTODROP_MAX_FILE_SIZE` | `52428800` | Integer bytes 1–2147483648 (2 GiB); each file must transfer within 30 minutes | Public limit |
 
 No separate admin username, session-secret, database URL or TLS-certificate
 variable exists. Event quotas are set in the UI, not environment.
