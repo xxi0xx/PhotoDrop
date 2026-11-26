@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-11-26
+
+- Update go-jose to 4.1.6 (via go-oidc 3.21.0) for OIDC token and key validation fixes,
+  including GHSA-mgcc-cww5-fp2q. JWKs with RSA keys larger than 4096 bits are now rejected.
+- Update compatible Go dependencies (AWS SDK, golang.org/x/crypto, SQLite driver), frontend
+  build tooling (Svelte, Vite) and pinned GitHub Actions.
+
+Upgrade: no migrations or configuration changes. If OIDC is enabled, confirm your identity
+provider's signing keys are RSA 4096 bits or smaller (or EC/Ed25519), then test a sign-in.
+
 ## [1.2.0] — 2026-11-26
 
 - Raise the `PHOTODROP_MAX_FILE_SIZE` ceiling from 1 GiB to 2 GiB (2147483648 bytes).

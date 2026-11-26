@@ -43,7 +43,7 @@ and upload a small supported photo or video.
 Use Compose/example files from the matching release checkout. Set in `.env`:
 
 ```dotenv
-PHOTODROP_IMAGE=ghcr.io/xxi0xx/photodrop:1.2.0
+PHOTODROP_IMAGE=ghcr.io/xxi0xx/photodrop:1.2.1
 ```
 
 Run `docker compose pull photodrop`, then `docker compose up --no-build --wait -d`.

@@ -18,6 +18,12 @@ Use the same overlays throughout. Check logs privately, sign in, verify an exist
 event/public link/counts, then test upload/export. Startup validates checksums and
 applies new migrations transactionally.
 
+## v1.2.0 to v1.2.1
+
+Dependency and security update; no migrations or configuration changes. go-jose
+4.1.6 rejects JWKs with RSA keys larger than 4096 bits, so with OIDC enabled confirm
+your provider's signing keys fit and test a sign-in after upgrading.
+
 ## v1.1.0 to v1.2.0
 
 No migrations; data and configuration are unchanged. 1.2.0 accepts
@@ -52,7 +58,7 @@ and old image, verify, then switch traffic. Schema rollback cannot undo remote d
 
 | Image reference | Meaning |
 | --- | --- |
-| `ghcr.io/xxi0xx/photodrop:1.2.0` | Full release tag; workflow refuses overwrite |
+| `ghcr.io/xxi0xx/photodrop:1.2.1` | Full release tag; workflow refuses overwrite |
 | `:1.2` | Moving stable patch line |
 | `:1` | Moving stable major line |
 | `:latest` | Most recently promoted stable release, never prerelease |
