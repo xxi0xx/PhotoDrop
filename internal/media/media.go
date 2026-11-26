@@ -389,7 +389,8 @@ func (s *Service) removeAttempt(ctx context.Context, eventID int64, id, key stri
 }
 
 // Cleanup runs in bounded startup and periodic passes. An hour exceeds the
-// ten-minute upload deadline; recent pending rows continue reserving capacity.
+// thirty-minute transfer deadline (config.TransferTimeout); recent pending
+// rows continue reserving capacity.
 func (s *Service) Cleanup(ctx context.Context) error {
 	if !s.cleanupMu.TryLock() {
 		return nil
