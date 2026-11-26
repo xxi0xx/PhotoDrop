@@ -4,9 +4,6 @@
 
 ## [Unreleased]
 
-- Raise the `PHOTODROP_MAX_FILE_SIZE` ceiling from 1 GiB to 2 GiB. Guest uploads,
-  object-store reads and Immich imports now allow 30 minutes per file instead of 10.
-
 ## [1.1.0] — 2026-09-30
 
 - Collect MP4 and QuickTime MOV videos alongside JPEG, PNG, WebP, GIF, HEIC and
