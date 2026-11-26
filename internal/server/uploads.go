@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"photodrop/internal/abuse"
+	"photodrop/internal/config"
 	"photodrop/internal/events"
 	"photodrop/internal/media"
 )
 
-const uploadTimeout = 10 * time.Minute
+const uploadTimeout = config.TransferTimeout
 
 func (a *application) writeAdminEvent(w http.ResponseWriter, r *http.Request, e events.Event) {
 	stats, err := a.media.Stats(r.Context())

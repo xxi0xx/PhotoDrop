@@ -68,7 +68,7 @@
       const xhr = new XMLHttpRequest();
       const finish = (cause?: Error) => { active.delete(xhr); cause ? reject(cause) : resolve(); };
       xhr.open(plan?.method ?? 'POST', plan?.url ?? `/api/public/events/${encodeURIComponent(publicID)}/upload-sessions/${item.grant!.id}/assets`);
-      xhr.timeout = 10 * 60 * 1000 + 15000;
+      xhr.timeout = 30 * 60 * 1000 + 15000; // config.TransferTimeout plus slack
       if (plan) { for (const [name,value] of Object.entries(plan.headers)) xhr.setRequestHeader(name,value); }
       else {
         xhr.setRequestHeader('Content-Type', item.file.type || 'application/octet-stream');

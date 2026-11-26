@@ -9,18 +9,20 @@ import { releasePlan } from './release.mjs';
 import { changelogNotes } from './release-notes.mjs';
 import { releaseLanguageErrors } from './release-language.mjs';
 
-test('1.1.0 stable plan and exact version notes exclude future work and older releases', () => {
-  const plan = releasePlan('v1.1.0', 'xxi0xx/PhotoDrop');
-  assert.equal(plan.version, '1.1.0'); assert.equal(plan.prerelease, false);
-  assert.equal(plan.immutable, 'ghcr.io/xxi0xx/photodrop:1.1.0');
-  assert.deepEqual(plan.aliases, ['ghcr.io/xxi0xx/photodrop:1.1', 'ghcr.io/xxi0xx/photodrop:1', 'ghcr.io/xxi0xx/photodrop:latest']);
+test('1.2.0 stable plan and exact version notes exclude future work and older releases', () => {
+  const plan = releasePlan('v1.2.0', 'xxi0xx/PhotoDrop');
+  assert.equal(plan.version, '1.2.0'); assert.equal(plan.prerelease, false);
+  assert.equal(plan.immutable, 'ghcr.io/xxi0xx/photodrop:1.2.0');
+  assert.deepEqual(plan.aliases, ['ghcr.io/xxi0xx/photodrop:1.2', 'ghcr.io/xxi0xx/photodrop:1', 'ghcr.io/xxi0xx/photodrop:latest']);
   const changelog = readFileSync('CHANGELOG.md', 'utf8'), notes = changelogNotes(plan.version, changelog);
-  assert.match(notes, /^## \[1\.1\.0\]/); assert.doesNotMatch(notes, /Unreleased|\[1\.0\.0\]|Phase \d|Gate \d/i);
-  assert.equal(changelog.split('## [Unreleased]')[1].split('## [1.1.0]')[0].trim(), '');
+  assert.match(notes, /^## \[1\.2\.0\]/); assert.doesNotMatch(notes, /Unreleased|\[1\.1\.0\]|\[1\.0\.0\]|Phase \d|Gate \d/i);
+  const previous = changelogNotes('1.1.0', changelog);
+  assert.match(previous, /^## \[1\.1\.0\]/); assert.doesNotMatch(previous, /Unreleased|\[1\.2\.0\]|\[1\.0\.0\]/);
+  assert.equal(changelog.split('## [Unreleased]')[1].split('## [1.2.0]')[0].trim(), '');
   assert.deepEqual(releaseLanguageErrors('notes.md', notes), []);
   assert.equal(changelogNotes('1.0.0', 'Old whole-file notes\n'), 'Old whole-file notes\n');
   assert.throws(() => changelogNotes('2.0.0', changelog), /exactly one/);
-  assert.throws(() => changelogNotes('1.1.0', changelog + '\n## [1.1.0]\nduplicate'), /exactly one/);
+  assert.throws(() => changelogNotes('1.2.0', changelog + '\n## [1.2.0]\nduplicate'), /exactly one/);
 });
 
 test('release-language scope rejects stale product status but permits marked history and generic policy', () => {
