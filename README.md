@@ -1,4 +1,4 @@
-# PhotoDrop 1.2.0
+# PhotoDrop 1.2.1
 
 Collect event photos and videos from guests without asking them to create accounts. Share an
 event link or QR code; guests choose files, optionally leave their name, and
