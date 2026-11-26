@@ -1,4 +1,4 @@
-# PhotoDrop 1.1.0
+# PhotoDrop 1.2.0
 
 Collect event photos and videos from guests without asking them to create accounts. Share an
 event link or QR code; guests choose files, optionally leave their name, and
@@ -9,7 +9,8 @@ It stores media locally or sends browser uploads directly to private S3-compatib
 storage. Optional Immich integration copies completed media through its API.
 
 PhotoDrop 1.1.0 adds video collection, native OIDC sign-in, automatic Immich
-imports and independent photo/video quotas. Licensed under Apache-2.0.
+imports and independent photo/video quotas; 1.2.0 raises the per-file ceiling to
+2 GiB. Licensed under Apache-2.0.
 See the [changelog](CHANGELOG.md) and [release process](docs/releases.md).
 
 ## Features
