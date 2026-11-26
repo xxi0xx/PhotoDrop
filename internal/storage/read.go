@@ -6,10 +6,10 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"photodrop/internal/config"
 )
 
 // Reader is the streaming capability used by export and integrations. It does
@@ -72,7 +72,7 @@ func (s *S3) Open(ctx context.Context, key string) (io.ReadCloser, ObjectInfo, e
 	o, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: &s.cfg.Bucket, Key: &key}, func(o *s3.Options) {
 		// Control-plane requests keep their short timeout. Streaming a large
 		// object gets a bounded transfer deadline and still obeys cancellation.
-		o.HTTPClient = &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		o.HTTPClient = &http.Client{Timeout: config.TransferTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	})
 	if err != nil {
 		return nil, ObjectInfo{}, safeS3Error(err)

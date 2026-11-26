@@ -335,7 +335,7 @@ PhotoDrop never deletes Immich assets or albums.
 Do not manually copy files into Immich's managed library directory.
 
 Control requests use 15-second deadlines (connection test has a total 20-second
-HTTP budget); uploads/S3 reads allow up to 10 minutes and honor cancellation.
+HTTP budget); uploads/S3 reads allow up to 30 minutes and honor cancellation.
 JSON responses are bounded (64 KiB normally, 4 MiB for album listings/details).
 Credentials are never forwarded across redirects. Provider response bodies and
 transport errors are replaced with safe error messages. URLs are deployment
