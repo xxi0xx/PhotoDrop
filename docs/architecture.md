@@ -35,6 +35,8 @@ migration 014): a binding names its account, which is fixed once its album exist
 stay in runtime configuration, never frontend bundles or backend identity records.
 The exception is hosts' linked Immich keys, stored encrypted under a master key
 file outside `/data` (`internal/secrets`; see [security](security.md#stored-credentials)).
+Hosts link those keys through Immich's own OAuth sign-in, driven server-to-server
+by `internal/integrations/immich` (`link.go`) with persistence in `internal/destinations`.
 
 Native OIDC is optional login for administrators and hosts: authorization-code +
 PKCE with lazy discovery and signed ID-token validation, then the same opaque local

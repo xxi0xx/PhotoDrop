@@ -36,6 +36,11 @@ Migration 013 adds hosts and event ownership. It needs no configuration change:
   into the administrator's config account and attaches existing bindings to it.
   Existing albums, imports and automatic import keep working with no steps. A
   target with a URL but no API key becomes link-only.
+- **Immich account linking.** Hosts can link their own Immich accounts (Account
+  page). It needs Immich 3.4.2 with OAuth through the same identity provider, the
+  redirect URI `<PHOTODROP_BASE_URL>/api/admin/destinations/immich/callback` on the
+  Immich client, and a secrets key. See
+  [linking](export-immich.md#linking-a-hosts-own-immich-account).
 - **Optional secrets key.** Linking hosts' own Immich accounts needs
   `PHOTODROP_SECRETS_KEY_FILE` (see [configuration](configuration.md#secrets-key-for-linked-accounts)).
   Back the key file up separately from `/data`. Without it, PhotoDrop runs as before.

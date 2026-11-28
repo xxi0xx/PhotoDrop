@@ -53,7 +53,29 @@ type API interface {
 
 type Client struct {
 	base, key string
-	http      *http.Client
+	// bearer is a short-lived Immich session token used only during account
+	// linking; it replaces the API key header when set.
+	bearer string
+	http   *http.Client
+}
+
+func (Client) String() string     { return "Immich client (credentials redacted)" }
+func (c Client) GoString() string { return c.String() }
+
+// anonymous is a client with no credential, for public OAuth endpoints.
+func anonymous(base string) (*Client, error) {
+	normalized, err := config.NormalizeImmichURL(base)
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	return &Client{base: normalized + "/api", http: &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+}
+
+// as returns a copy authenticated by a session token or an API key.
+func (c *Client) as(bearer, key string) *Client {
+	copy := *c
+	copy.bearer, copy.key = bearer, key
+	return &copy
 }
 
 func NewClient(cfg config.Immich) (*Client, error) {
@@ -71,7 +93,12 @@ func (c *Client) request(ctx context.Context, method, path, kind string, body io
 	if err != nil {
 		return ErrUnavailable
 	}
-	req.Header.Set("x-api-key", c.key)
+	switch {
+	case c.bearer != "":
+		req.Header.Set("Authorization", "Bearer "+c.bearer)
+	case c.key != "":
+		req.Header.Set("x-api-key", c.key)
+	}
 	if kind != "" {
 		req.Header.Set("Content-Type", kind)
 	}
@@ -93,7 +120,13 @@ func (c *Client) request(ctx context.Context, method, path, kind string, body io
 		return ErrUnavailable
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
-	if err != nil || int64(len(data)) > limit || json.Unmarshal(data, out) != nil {
+	if err != nil || int64(len(data)) > limit {
+		return ErrUnavailable
+	}
+	if out == nil {
+		return nil
+	}
+	if json.Unmarshal(data, out) != nil {
 		return ErrUnavailable
 	}
 	return nil
@@ -261,3 +294,28 @@ func safeError(err error) string {
 // provider or transport returned an arbitrary error containing secret material.
 func SafeError(err error) string { return safeError(err) }
 func (v Version) String() string { return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch) }
+
+// SupportsLink reports whether a server can run PhotoDrop's account-link flow:
+// major version 3 at 3.4.2 or later, the release whose OAuth behaviour the
+// link flow was verified against. The importer still accepts any 3.x.
+func SupportsLink(v Version) bool {
+	return v.Major == 3 && (v.Minor > 4 || v.Minor == 4 && v.Patch >= 2)
+}
+
+// keyID returns the id of the API key this client authenticates with, and
+// requires it to still carry the four permissions PhotoDrop needs.
+func (c *Client) keyID(ctx context.Context) (string, error) {
+	var key struct {
+		ID          string   `json:"id"`
+		Permissions []string `json:"permissions"`
+	}
+	if err := c.json(ctx, "GET", "/api-keys/me", nil, &key, 64<<10); err != nil {
+		return "", err
+	}
+	for _, p := range requiredPermissions {
+		if !slices.Contains(key.Permissions, p) && !slices.Contains(key.Permissions, "all") {
+			return "", ErrAuth
+		}
+	}
+	return key.ID, nil
+}

@@ -44,7 +44,7 @@ func TestProviderValidatesConfigAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	home, _ := targets.ByKey("home")
-	p := NewProvider(targets)
+	p := NewProvider(targets, nil)
 	account := destinations.Account{ID: 1, Provider: "immich", TargetID: home.ID, Source: destinations.SourceConfig}
 	if p.Name() != "immich" {
 		t.Fatal(p.Name())
@@ -64,7 +64,7 @@ func TestProviderValidatesConfigAccounts(t *testing.T) {
 	if _, err := p.Validate(t.Context(), destinations.Account{Provider: "immich", TargetID: 999}, []byte("good-key")); !errors.Is(err, ErrCredentials) {
 		t.Fatal("unknown target", err)
 	}
-	if _, err := p.BeginLink(t.Context(), destinations.LinkRequest{}); !errors.Is(err, destinations.ErrLinkUnsupported) {
-		t.Fatal("linking must be unavailable until it is built", err)
+	if _, err := p.BeginLink(t.Context(), destinations.LinkRequest{TargetKey: "missing"}); !errors.Is(err, destinations.ErrLinkFailed) {
+		t.Fatal("link to an unknown target", err)
 	}
 }

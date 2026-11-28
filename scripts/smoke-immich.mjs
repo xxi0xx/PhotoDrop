@@ -203,7 +203,9 @@ autoState=await waitFor(automaticEvent,s=>s.job.status==='running'&&s.pending===
 await upload(automaticEvent);await upload(automaticEvent);
 assert.equal((await status(automaticEvent)).new,2);
 const interruptedAutoJob=autoState.job.id;
-compose(['kill','-s','SIGKILL','photodrop']);await control({});await restart();
+// The proxy must see the killed client's held upload end before the hold is
+// released, or that dead request would still reach Immich (a duplicate later).
+compose(['kill','-s','SIGKILL','photodrop']);await waitControl(value=>value.held===0);await control({});await restart();
 autoState=await waitFor(automaticEvent,s=>s.imported===18&&s.job.status==='completed');
 assert.equal(autoState.job.id,interruptedAutoJob+1,'restart stranded or split the untracked backlog');
 

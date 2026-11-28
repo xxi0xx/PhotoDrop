@@ -30,13 +30,17 @@ type faultState struct {
 	Uploads      int  `json:"uploads"`
 	Created      int  `json:"created"`
 	Duplicates   int  `json:"duplicates"`
+	// Held counts uploads waiting at the hold gate; a dead client leaves it.
+	Held int `json:"held"`
 }
 
 func main() {
 	for _, address := range []string{":18092", ":18093"} {
 		go func() { log.Fatal(http.ListenAndServe(address, s3test.New("http://localhost:8083"))) }()
 	}
-	upstream, _ := url.Parse("http://immich-server:2283")
+	go serveOIDC()
+	// Immich shares this network namespace (see compose-immich-test.yml).
+	upstream, _ := url.Parse("http://localhost:2283")
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	var mu sync.Mutex
 	var state faultState
@@ -147,10 +151,26 @@ func main() {
 			state.FailNext = false
 			mu.Unlock()
 			if gate != nil {
+				// Read the body before holding: only then does the server watch
+				// the connection and cancel r.Context() when the client dies, so
+				// a held upload from a killed PhotoDrop is never forwarded later.
+				body, err := io.ReadAll(io.LimitReader(r.Body, 256<<20))
+				if err != nil {
+					return
+				}
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				mu.Lock()
+				state.Held++
+				mu.Unlock()
 				select {
 				case <-r.Context().Done():
-					return
 				case <-gate:
+				}
+				mu.Lock()
+				state.Held--
+				mu.Unlock()
+				if r.Context().Err() != nil {
+					return
 				}
 			}
 			if fail {

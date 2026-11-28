@@ -233,7 +233,7 @@ func TestHostAdministrationAndRemovedUsers(t *testing.T) {
 		t.Fatal("password sign-in is not host 1", passwordSession.Host)
 	}
 	admin := f.signIn(oidctest.Faults{})
-	host := f.signIn(oidctest.Faults{Subject: "host-a", Groups: []string{"photodrop-hosts"}, Email: "a@example.test"})
+	host := f.signIn(oidctest.Faults{Subject: "host-a", Groups: []string{"photodrop-hosts"}, Email: "a@example.test", EmailVerified: true})
 	if admin.session.Host.ID != auth.PasswordHostID {
 		t.Fatal("admin did not claim host 1")
 	}

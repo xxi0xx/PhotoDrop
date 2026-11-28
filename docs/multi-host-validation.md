@@ -271,3 +271,105 @@ Baseline: `main` after PR 40 (`b3e7692`). Branch: `multi-host/phase-3-accounts`.
 
 Gate: `smoke-release.mjs` (existing bindings and auto-import survive the upgrade)
 and `smoke-immich.mjs` pass unchanged.
+
+## Phase 4 — Linking
+
+Baseline: the phase 3 branch (`multi-host/phase-3-accounts`, PR 41). Branch:
+`multi-host/phase-4-linking`.
+
+### VERIFY results (before any link code)
+
+Run first against real Immich v3.4.2 with OAuth through the test identity
+provider (`node scripts/smoke-immich-link.mjs`, VERIFY section). Both passed on the
+first run, so the link flow in the plan stands unchanged:
+
+- **VERIFY 1:** the session from `POST /api/oauth/callback` authenticates
+  server-to-server as `Authorization: Bearer` (`GET /users/me` returned the user,
+  with `oauthId` equal to the identity subject).
+- **VERIFY 2:** the identity provider saw a token exchange whose `redirect_uri`
+  equalled the callback URL PhotoDrop submitted, using `client_secret_post`.
+  Submitting a different URL changed the `redirect_uri` Immich sent, and the
+  exchange was refused.
+- Also confirmed: the session can mint and delete a 4-permission key, the key's
+  `GET /api-keys/me` returns its id, and after `POST /auth/logout` the session gets
+  `401`.
+
+Immich source read for this (v3.4.2): `oauth.repository.ts` (openid-client
+`authorizationCodeGrant` with the submitted URL; no `nonce`; PKCE when
+advertised), `auth.service.ts` (body `state`/`codeVerifier` override cookies; user
+found by `oauthId`, then email; Bearer token accepted), and the OAuth config
+defaults (`client_secret_post`).
+
+### Changes
+
+- Owner decisions: a host's email is stored only when `email_verified` is true;
+  host 1 stays admin while password sign-in is enabled.
+- Test stack: `immich-server` and the test identity provider share the `objects`
+  network namespace; Immich OAuth is configured (`autoRegister: false`); PhotoDrop
+  runs `password+oidc` with host groups and `PHOTODROP_BASE_URL`; a test-only
+  entrypoint writes the per-run secrets key with owner 10001 and mode 400. The
+  OIDC fixture gained several clients with exact redirect allowlists,
+  `client_secret_post`, optional nonce, a userinfo endpoint and an exchange log.
+- Link flow: `GET /api/admin/destinations`, `POST …/immich/link` (link or relink),
+  `GET …/immich/callback`, `POST …/{id}/unlink`, `POST …/{id}/forget`. Browser-bound,
+  session-bound, five-minute transactions in `destination_link_transactions`.
+  Immich's authorize URL must echo state, redirect URI and PKCE challenge. The
+  session is logged out on every exit path. Identity by subject or verified email
+  (`PHOTODROP_IMMICH_<KEY>_LINK_MATCH`), with the `link_subject_mismatch`
+  diagnostic. Exactly four permissions, self-checked; stored with AES-GCM and AAD;
+  anything created remotely is deleted on a later failure. `SupportsLink`
+  requires 3.4.2 or later.
+- Ongoing validation: before each job and connection test, and once at startup in
+  the background, a linked key must still be the stored key with the four
+  permissions; a rejected or replaced key marks the account `needs_relink`;
+  network errors change nothing.
+- Web: Account page (`/admin/account`) with Link, Relink, Unlink and Forget and
+  one fixed message per result code; the Immich section points hosts there.
+- Docs: export and Immich (linking), OIDC (Immich redirect URI, subject mode),
+  configuration (`LINK_MATCH`), security, architecture and upgrading.
+
+### Local evidence (2026-11-28, America/Chicago)
+
+- `node scripts/smoke-immich-link.mjs` passed (VERIFY plus cases 2–7): one named
+  4-permission key per link; the host's album (owner in `albumUsers`) and imported
+  photo are in the host's Immich library, not the admin's; the link session is not
+  among the host's Immich sessions afterwards; a different identity at the Immich
+  step gets `link_wrong_user` and no key; relink leaves one key and unlink none;
+  with no Immich user, `link_failed` and no user, key or account is created; a
+  subject-mode mismatch gets `link_subject_mismatch`; PhotoDrop's logs contain no
+  key, session or client secret.
+- `node scripts/smoke-immich.mjs` passed through the changed test stack.
+- `node scripts/smoke-oidc.mjs` passed.
+- Browser check (in-app browser against the test stack): a host signed in through
+  SSO, opened Account, clicked **Link Immich**, went through Immich and the
+  identity provider, and came back to "Your Immich account is linked" (linked as
+  the host's email, Relink and Unlink shown). Unlink asked for confirmation and
+  ended with "Your Immich account is unlinked, and PhotoDrop deleted its API key in
+  Immich".
+- Go: CGO-free `go test ./...`, `go vet ./...` and `gofmt -l` passed. The logout
+  guarantee was mutation-checked: making `CompleteLink` skip the deferred logout
+  fails every link test. Linux (`golang:1.27` container): `go test -race ./...` passed
+  in all 14 packages.
+- Frontend: check (0 errors, 0 warnings), 48 tests and build passed.
+  `check-docs.mjs`, `release.test.mjs` and `git diff --check` passed.
+
+### Security tests (plan, Testing section)
+
+| Plan requirement | Test |
+| --- | --- |
+| Authorize-URL mismatches (state, redirect_uri, code_challenge); old server | `TestLinkStartValidatesImmichAndTheTarget` |
+| Duplicate query parameters; expired, replayed, wrong-browser and wrong-session transactions; provider error | `TestLinkCallbackRejectsReplayedOrForeignTransactions` |
+| Wrong user by subject and by email; subject mismatch; email mode | `TestLinkRefusesWrongPeopleAndBadResponses` |
+| Account already in use; unique-index conflict at store time (key deleted) | `TestLinkConflictsAndForget` |
+| Key permissions mismatch and self-check mismatch (key deleted) | `TestLinkRefusesWrongPeopleAndBadResponses` |
+| Logout attempted on every exit path (counted) | every case of `TestLinkRefusesWrongPeopleAndBadResponses`, `TestLinkStoresAnEncryptedScopedKeyAndLogsOut` |
+| Oversized responses | `TestLinkRefusesWrongPeopleAndBadResponses` (oversized user) |
+| Relink deletes the old key; unlink treats `404` as done | `TestLinkStoresAnEncryptedScopedKeyAndLogsOut`, `TestLinkConflictsAndForget` |
+| No secrets in output (logs, responses, database file) | `TestLinkStoresAnEncryptedScopedKeyAndLogsOut`, smoke log check |
+| Validation: `401` → `needs_relink`; `5xx` → no state change; relink restores | `TestLinkedAccountValidation` |
+| Version gate | `TestSupportsLink` |
+| Verified email and host 1 role | `TestOIDCRoleDerivationAdminWinsAndProfileClaims`, `TestHostOneKeepsAdminWhilePasswordSignInIsEnabled` |
+| Real-server cases 1–7 | `scripts/smoke-immich-link.mjs` |
+
+Gate: VERIFY 1–2, every link-flow unit test, smoke cases 1–7 and a browser run of
+the Account page (met locally); CI pending the PR's checks.

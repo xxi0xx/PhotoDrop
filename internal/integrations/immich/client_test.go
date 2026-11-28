@@ -206,3 +206,14 @@ func TestAdapterFailuresAreBoundedAndRedacted(t *testing.T) {
 		}
 	})
 }
+
+func TestSupportsLink(t *testing.T) {
+	for v, want := range map[Version]bool{
+		{3, 4, 2}: true, {3, 4, 3}: true, {3, 5, 0}: true, {3, 10, 0}: true,
+		{3, 4, 1}: false, {3, 3, 9}: false, {3, 2, 1}: false, {2, 9, 9}: false, {4, 0, 0}: false,
+	} {
+		if SupportsLink(v) != want {
+			t.Fatalf("SupportsLink(%s) != %v", v, want)
+		}
+	}
+}

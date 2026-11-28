@@ -46,11 +46,14 @@ type application struct {
 	oidc            *auth.OIDC
 	oidcSlots       chan struct{}
 	keyring         *secrets.Keyring // Used by destination accounts; nil-safe.
+	db              *sql.DB
+	links           *immich.Provider
+	linkMatch       map[string]string // target key -> "subject" or "email"
 }
 
 func (a *application) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/login", func(w http.ResponseWriter, r *http.Request) { a.page(w, http.StatusOK) })
-	for _, path := range []string{"/admin", "/admin/{$}", "/admin/events/new", "/admin/events/{id}", "/admin/hosts"} {
+	for _, path := range []string{"/admin", "/admin/{$}", "/admin/events/new", "/admin/events/{id}", "/admin/hosts", "/admin/account"} {
 		mux.HandleFunc("GET "+path, a.adminPage)
 	}
 	mux.HandleFunc("GET /e/{public_id}", a.publicPage)
@@ -78,9 +81,16 @@ func (a *application) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/admin/immich/targets", a.protected(a.immichTargets))
 	mux.HandleFunc("GET /api/admin/hosts", a.protected(a.adminOnly(a.listHosts)))
 	mux.HandleFunc("PUT /api/admin/hosts/{id}", a.protected(a.adminOnly(a.updateHost)))
+	mux.HandleFunc("GET /api/admin/destinations", a.protected(a.listDestinations))
+	mux.HandleFunc("POST /api/admin/destinations/immich/link", a.protected(a.startLink))
+	mux.HandleFunc("GET "+linkCallbackPath, a.linkCallback)
+	mux.HandleFunc("POST /api/admin/destinations/{id}/unlink", a.protected(a.startUnlink))
+	mux.HandleFunc("POST /api/admin/destinations/{id}/forget", a.protected(a.forgetAccount))
 	for path, methods := range map[string]string{
 		"/api/admin/auth/methods": "GET, HEAD", "/api/admin/oidc/login": "GET", "/api/admin/oidc/callback": "GET",
 		"/api/admin/hosts": "GET, HEAD", "/api/admin/hosts/{id}": "PUT", "/api/admin/events/{id}/owner": "PUT",
+		"/api/admin/destinations": "GET, HEAD", "/api/admin/destinations/immich/link": "POST", linkCallbackPath: "GET",
+		"/api/admin/destinations/{id}/unlink": "POST", "/api/admin/destinations/{id}/forget": "POST",
 		"/api/admin/immich/targets": "GET, HEAD", "/api/admin/events/{id}/immich/album": "POST",
 		"/api/admin/events/{id}/immich/auto-import": "PUT",
 		"/api/admin/events/{id}/immich":             "GET, HEAD", "/api/admin/events/{id}/immich/test": "POST", "/api/admin/events/{id}/immich/jobs": "POST", "/api/admin/events/{id}/immich/cancel": "POST",

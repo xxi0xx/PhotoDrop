@@ -10,6 +10,7 @@ import (
 
 	"photodrop/internal/config"
 	"photodrop/internal/destinations"
+	"photodrop/internal/secrets"
 )
 
 // Target is an Immich server as one host sees it: Available and Account
@@ -141,17 +142,27 @@ type TargetCatalog struct {
 	Targets      []Target `json:"targets"`
 }
 
-// usable reports whether an account can make Immich requests now. Linked
-// accounts need the credential flow, which this deployment does not run yet.
-func (t Target) usable(a destinations.Account) bool {
-	return a.Status == destinations.StatusActive && a.Source == destinations.SourceConfig && t.client != nil
+// usable reports whether an account can make Immich requests now: a config
+// account needs its configured key; a linked account needs a loaded key that can
+// decrypt its stored credential.
+func (s *Service) usable(t Target, a destinations.Account) bool {
+	if a.Status != destinations.StatusActive {
+		return false
+	}
+	switch a.Source {
+	case destinations.SourceConfig:
+		return t.client != nil
+	case destinations.SourceLinked:
+		return t.base != "" && s.keyring.Has(a.KeyID) && len(a.Ciphertext) > 0
+	}
+	return false
 }
 
 // withAccount is the target as seen through one account.
-func (t Target) withAccount(a destinations.Account) Target {
+func (s *Service) withAccount(t Target, a destinations.Account) Target {
 	public := a.Public()
 	t.Account = &public
-	t.Available = t.usable(a)
+	t.Available = s.usable(t, a)
 	return t
 }
 
@@ -167,7 +178,7 @@ func (s *Service) TargetCatalog(ctx context.Context, hostID int64) (TargetCatalo
 	result := TargetCatalog{Targets: []Target{}}
 	for _, one := range s.targets.entries {
 		if a, ok := accounts[one.ID]; ok {
-			view := one.withAccount(a)
+			view := s.withAccount(one, a)
 			result.Targets = append(result.Targets, view)
 			if view.Key == s.targets.ActiveKey && view.Available {
 				result.ActiveTarget = view.Key
@@ -178,10 +189,10 @@ func (s *Service) TargetCatalog(ctx context.Context, hostID int64) (TargetCatalo
 	return result, nil
 }
 
-// accountClient resolves the Immich client for an account. Only active config
-// accounts with a configured key have one in this release.
-// q must be the open transaction when the caller holds one: the database has a
-// single connection.
+// accountClient resolves the Immich client for an account. A linked account's
+// key is decrypted here, just before the client is built, and lives only as
+// long as that client. q must be the open transaction when the caller holds
+// one: the database has a single connection.
 func (s *Service) accountClient(ctx context.Context, q rowQuerier, accountID int64) (API, error) {
 	a, err := destinations.Get(ctx, q, accountID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -191,10 +202,91 @@ func (s *Service) accountClient(ctx context.Context, q rowQuerier, accountID int
 		return nil, err
 	}
 	t, ok := s.targets.entries[a.TargetID]
-	if !ok || !t.usable(a) {
+	if !ok || !s.usable(t, a) {
 		return nil, ErrCredentials
 	}
-	return t.client, nil
+	if a.Source == destinations.SourceConfig {
+		return t.client, nil
+	}
+	secret, err := s.decrypt(t, a)
+	if err != nil {
+		return nil, ErrCredentials
+	}
+	defer clear(secret)
+	client, err := NewClient(config.Immich{URL: t.base, APIKey: string(secret)})
+	if err != nil {
+		return nil, ErrCredentials
+	}
+	return &linkedClient{Client: client, account: a, service: s}, nil
 }
+
+func (s *Service) decrypt(t Target, a destinations.Account) ([]byte, error) {
+	aad, err := secrets.AAD(secrets.Binding{AccountID: a.ID, Provider: a.Provider, TargetKey: t.Key, RemoteUserID: a.RemoteUserID, RemoteCredentialID: a.RemoteCredentialID})
+	if err != nil {
+		return nil, err
+	}
+	return s.keyring.Decrypt(a.KeyID, a.Nonce, a.Ciphertext, aad)
+}
+
+// linkedClient validates that a linked key is still the one PhotoDrop minted:
+// its id must equal the stored remote credential id and its permissions must
+// still cover the four required ones. A rejected or replaced key marks the
+// account needs_relink; transport errors and 5xx leave it alone.
+type linkedClient struct {
+	*Client
+	account destinations.Account
+	service *Service
+}
+
+func (c *linkedClient) Validate(ctx context.Context) (Version, error) {
+	id, err := c.Client.keyID(ctx)
+	switch {
+	case errors.Is(err, ErrAuth):
+		c.service.needsRelink(c.account, destinations.ReasonRejected)
+		return Version{}, err
+	case err != nil:
+		return Version{}, err
+	case id != c.account.RemoteCredentialID:
+		c.service.needsRelink(c.account, destinations.ReasonKeyChanged)
+		return Version{}, ErrAuth
+	}
+	v, err := c.Client.Validate(ctx)
+	if errors.Is(err, ErrAuth) {
+		c.service.needsRelink(c.account, destinations.ReasonRejected)
+	}
+	if err == nil {
+		_ = destinations.MarkValidated(ctx, c.service.db, c.account.ID)
+	}
+	return v, err
+}
+
+func (s *Service) needsRelink(a destinations.Account, reason string) {
+	done, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := destinations.MarkNeedsRelink(done, s.db, a.ID, reason); err == nil && s.logger != nil {
+		s.logger.Warn("linked Immich account needs relinking", "account_id", a.ID)
+	}
+}
+
+// ValidateLinked checks every active linked account once, in the background at
+// startup. It never blocks startup and never deletes anything remotely.
+func (s *Service) ValidateLinked(ctx context.Context) {
+	accounts, err := destinations.LinkedAccounts(ctx, s.db)
+	if err != nil {
+		return
+	}
+	for _, a := range accounts {
+		client, err := s.accountClient(ctx, s.db, a.ID)
+		if err != nil {
+			continue
+		}
+		check, cancel := context.WithTimeout(ctx, 20*time.Second)
+		_, _ = client.Validate(check)
+		cancel()
+	}
+}
+
+// ConfigureSecrets gives the service the keyring for linked accounts.
+func (s *Service) ConfigureSecrets(ring *secrets.Keyring) { s.keyring = ring }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }

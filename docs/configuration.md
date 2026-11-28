@@ -104,6 +104,7 @@ See [backend configuration](storage-backends.md).
 | `PHOTODROP_IMMICH_<KEY>_URL` | empty | HTTP(S) origin used for server API requests; immutable identity | Internal addressing |
 | `PHOTODROP_IMMICH_<KEY>_PUBLIC_URL` | empty / optional | HTTP(S) browser origin without credentials, path, query or fragment; enables album navigation; restart required | Public addressing, never secret |
 | `PHOTODROP_IMMICH_<KEY>_API_KEY` | empty | Up to 4096 bytes, no NUL/newline; required for operations | Secret |
+| `PHOTODROP_IMMICH_<KEY>_LINK_MATCH` | `subject` | `subject` or `email`: how account linking matches an Immich user to a host. Use `email` when the identity provider gives Immich and PhotoDrop different subjects; it compares the host's verified email | Linking policy |
 
 Use uppercase/underscore key substitution. Historical targets can omit URL/key and
 remain unavailable without erasing identity. A configured key is the administrator's

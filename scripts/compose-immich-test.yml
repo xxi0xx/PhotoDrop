@@ -14,8 +14,12 @@ services:
       - 127.0.0.1:18092:18092
       - 127.0.0.1:18093:18093
       - 127.0.0.1:2284:2284
+      # Immich and the test identity provider share this network namespace, so
+      # PhotoDrop, Immich and the test runner all use the same loopback URLs.
+      - 127.0.0.1:22830:2283
+      - 127.0.0.1:18997:18997
     healthcheck:
-      test: [CMD-SHELL, 'wget -q -O /dev/null http://localhost:18092/__test/requests && wget -q -O /dev/null http://localhost:2284/__test/control']
+      test: [CMD-SHELL, 'wget -q -O /dev/null http://localhost:18092/__test/requests && wget -q -O /dev/null http://localhost:2284/__test/control && wget -q -O /dev/null http://localhost:18997/__test/oidc']
       interval: 2s
       timeout: 2s
       retries: 60
@@ -24,6 +28,22 @@ services:
     build:
       context: ..
     network_mode: service:objects
+    # Test-only: writes the disposable per-run secrets key with production
+    # ownership (10001) and mode (400), then runs the normal entrypoint.
+    # Production images and Compose files never do this.
+    entrypoint:
+      - sh
+      - -ec
+      - |
+        if [ -n "$${PHOTODROP_TEST_SECRETS_KEY:-}" ]; then
+          mkdir -p /run/photodrop-test
+          printf %s "$$PHOTODROP_TEST_SECRETS_KEY" > /run/photodrop-test/secrets-key
+          chown 10001:10001 /run/photodrop-test/secrets-key
+          chmod 400 /run/photodrop-test/secrets-key
+        fi
+        exec /usr/local/bin/docker-entrypoint.sh "$$@"
+      - --
+    command: [/usr/local/bin/photodrop]
     depends_on:
       objects:
         condition: service_healthy
@@ -32,7 +52,16 @@ services:
     environment:
       PHOTODROP_LISTEN_ADDR: :8083
       PHOTODROP_DATA_DIR: /data
+      PHOTODROP_BASE_URL: http://localhost:8083
       PHOTODROP_ADMIN_PASSWORD: temporary-immich-test-admin-password
+      PHOTODROP_ADMIN_AUTH: password+oidc
+      PHOTODROP_OIDC_ISSUER: http://localhost:18997/application/o/drop/
+      PHOTODROP_OIDC_CLIENT_ID: photodrop-test
+      PHOTODROP_OIDC_CLIENT_SECRET: disposable-oidc-client-secret
+      PHOTODROP_OIDC_ALLOWED_GROUPS: photodrop-admins
+      PHOTODROP_OIDC_HOST_GROUPS: photodrop-hosts
+      PHOTODROP_TEST_SECRETS_KEY: '${PHOTODROP_TEST_SECRETS_KEY:-}'
+      PHOTODROP_SECRETS_KEY_FILE: '${PHOTODROP_TEST_SECRETS_KEY:+/run/photodrop-test/secrets-key}'
       PHOTODROP_STORAGE_PROVIDER: '${PHOTODROP_TEST_PROVIDER:-local}'
       PHOTODROP_STORAGE_BACKEND_KEY: '${PHOTODROP_TEST_BACKEND_KEY:-}'
       PHOTODROP_S3_BACKENDS: s3-a,s3-b
@@ -67,12 +96,13 @@ services:
       DB_DATABASE_NAME: immich
       REDIS_HOSTNAME: redis
       IMMICH_CONFIG_FILE: /test-config.json
+    network_mode: service:objects
     volumes:
       - immich-media:/data
       - ./immich-test-config.json:/test-config.json:ro
-    ports:
-      - 127.0.0.1:22830:2283
     depends_on:
+      objects:
+        condition: service_started
       database:
         condition: service_healthy
       redis:

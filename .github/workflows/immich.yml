@@ -53,6 +53,8 @@ jobs:
           exit 1
       - name: Validate mixed export and real Immich lifecycle
         run: node scripts/smoke-immich.mjs
+      - name: Validate Immich account linking (OAuth, link, relink, unlink)
+        run: node scripts/smoke-immich-link.mjs
       - name: Diagnostic logs
         if: failure()
         run: docker compose -f scripts/compose-immich-test.yml logs --no-color photodrop immich-server
