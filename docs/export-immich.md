@@ -168,7 +168,10 @@ reinterpreting historical imports. Use a new key for a different server, even
 if the old key is no longer active. Rotate API keys for the same Immich user;
 another user may not own the previously mapped album/assets.
 
-API keys stay in process configuration, never SQLite, logs, or browser responses.
+Configured API keys stay in process configuration, never SQLite, logs, or browser
+responses. Keys that hosts link themselves are the one exception: they are stored
+only as AES-256-GCM ciphertext under a key file outside `/data` (see
+[linking](#linking-a-hosts-own-immich-account)).
 Omitting historical credentials keeps their records visible and makes operations
 on that target safely unavailable. Immich outages, invalid keys, failed jobs,
 and missing credentials do not change `/healthz`.
@@ -316,11 +319,12 @@ automatically retry. For a failed manual import that already selected media, use
 **Retry unfinished import** instead; it also handles failure before the first
 upload. Queued/running jobs prevent concurrent duplicate submissions.
 
-API additions (administrator session required; mutations also require Origin
-and CSRF validation):
+API additions (a signed-in host session is required; mutations also require Origin
+and CSRF validation; a host reaches only its own events, see [hosts](oidc.md#hosts)):
 
-- `GET /api/admin/immich/targets` returns known target keys, local credential
-  availability, configured active target and optional browser origin. It performs
+- `GET /api/admin/immich/targets` returns the target keys where the caller has an
+  account, with that account's availability, the configured active target when the
+  caller can use it, and the optional browser origin. It performs
   no health probe and never returns internal API origins or API keys.
 - `POST /api/admin/events` accepts optional
   `"immich":{"target":"home","album_name":"Wedding","auto_import":false}`. Success remains 201 with

@@ -1,4 +1,4 @@
-# PhotoDrop 1.2.1
+# PhotoDrop 1.3.0
 
 Collect event photos and videos from guests without asking them to create accounts. Share an
 event link or QR code; guests choose files, optionally leave their name, and
@@ -11,7 +11,8 @@ storage. Optional Immich integration copies completed media through its API.
 
 PhotoDrop 1.1.0 adds video collection, native OIDC sign-in, automatic Immich
 imports and independent photo/video quotas; 1.2.0 raises the per-file ceiling to
-2 GiB. Licensed under Apache-2.0.
+2 GiB; 1.3.0 adds hosts who own their events and link their own Immich account.
+Licensed under Apache-2.0.
 See the [changelog](CHANGELOG.md) and [release process](docs/releases.md).
 
 ## Features
@@ -21,11 +22,14 @@ See the [changelog](CHANGELOG.md) and [release process](docs/releases.md).
 - Mobile image/video selection, progress, failed-only retry, and add-more flow.
 - Optional private contributor labels; no guest profiles or public photo browsing.
 - Local or direct S3 uploads, historical backend identity, and finalize-first recovery.
-- Password or native OIDC administrator sign-in, including Authentik configuration.
+- Password or native OIDC sign-in, including Authentik configuration, for
+  administrators and for hosts who see only their own events.
 - Independent photo/video quotas with calculated or custom total storage limits.
 - CSRF/origin checks, rate limits and optional Turnstile verification.
 - Portable filesystem export preserving original media bytes.
 - Event-time Immich album setup, manual or automatic import, and restart recovery.
+- Hosts link their own Immich account through Immich's OAuth sign-in; each event's
+  albums go to its host's library, using an encrypted, narrowly scoped API key.
 
 ## How uploads work
 

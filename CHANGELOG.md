@@ -4,6 +4,33 @@
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-11-28
+
+- Add hosts. People in `PHOTODROP_OIDC_HOST_GROUPS` (or `_HOST_SUBJECTS`) sign in
+  through your identity provider as hosts; the existing allowlists still grant the
+  administrator role. Each event belongs to the host who created it. Hosts see and
+  manage only their own events; administrators see everything, can disable hosts on
+  the new Hosts page, and can move an event to another host until it has an Immich
+  album.
+- Hosts link their own Immich account from the new Account page. PhotoDrop drives
+  Immich's OAuth sign-in through your identity provider, never sees a password,
+  checks that the Immich user is the host, and stores an encrypted API key that can
+  only create albums and upload photos. Each event's albums and photos go to its
+  host's own Immich library. Relink, unlink (which deletes the key in Immich) and
+  forget are available. Linking needs Immich 3.4.2 or later.
+- New `PHOTODROP_SECRETS_KEY_FILE` (a Docker secret) encrypts linked keys with
+  AES-256-GCM; `PHOTODROP_SECRETS_PREVIOUS_KEY_FILES` and `photodrop rotate-secrets`
+  rotate it. New `PHOTODROP_IMMICH_<KEY>_LINK_MATCH` chooses subject or verified-email
+  matching. Immich v3.4.2 is now the tested version.
+- Immich work for an event always uses its host's account. A target with a URL but
+  no API key is now link-only, and choosing a server where the event's host has no
+  account is refused instead of failing later.
+
+Upgrade: everyone signs in once, because sessions now belong to a host. Sign in as
+the administrator first so your identity keeps the existing events. Existing Immich
+targets and bindings keep working. To add hosts and linking, follow the operator
+setup in the upgrade guide, and back up the secrets key separately from `/data`.
+
 ## [1.2.1] — 2026-11-26
 
 - Update go-jose to 4.1.6 (via go-oidc 3.21.0) for OIDC token and key validation fixes,

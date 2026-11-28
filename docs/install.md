@@ -20,7 +20,8 @@ exact HTTPS origin, such as `https://drop.example.com`, and configure [HTTPS](re
 Password authentication remains the default. PhotoDrop 1.1.0 also supports
 native [OIDC / Authentik](oidc.md): `PHOTODROP_ADMIN_AUTH=oidc` needs no administrator
 password, but requires the public base URL, provider/client configuration and an
-explicit subject/group allowlist. `password+oidc` enables both methods. Configure
+explicit subject/group allowlist. From 1.3.0, separate host lists let other people
+sign in as hosts who see only their own events (see [upgrading](upgrading.md#v121-to-v130)). `password+oidc` enables both methods. Configure
 the fixed callback URI in the provider before attempting SSO.
 
 ```sh
@@ -43,7 +44,7 @@ and upload a small supported photo or video.
 Use Compose/example files from the matching release checkout. Set in `.env`:
 
 ```dotenv
-PHOTODROP_IMAGE=ghcr.io/xxi0xx/photodrop:1.2.1
+PHOTODROP_IMAGE=ghcr.io/xxi0xx/photodrop:1.3.0
 ```
 
 Run `docker compose pull photodrop`, then `docker compose up --no-build --wait -d`.
