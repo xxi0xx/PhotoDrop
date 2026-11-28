@@ -3,7 +3,8 @@
 Back up the complete persistent state, not just exported media:
 
 ```text
-/data/photodrop.db       events, auth/sessions, assets, quotas, backend identities,
+/data/photodrop.db       events, hosts and sessions, assets, quotas, backend identities,
+                       destination accounts (linked keys only as ciphertext),
                        contributors, migrations, Immich jobs/import mappings
 /data/uploads/          local originals, including historical local uploads
 /data/photodrop.db-*     SQLite sidecars, when present

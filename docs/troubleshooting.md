@@ -34,6 +34,14 @@ expanded Compose configuration or environment dumps: they can contain secrets.
 | Historical backend unavailable | Restore matching named credentials/configuration; never repoint an existing backend key |
 | Turnstile failure | Both keys, allowed public hostname, BASE_URL, fixed action, outbound HTTPS; test-key dummy hostname is not a production bypass |
 | Immich connection/import error | Tested v3.4.2 API, reachable single target URL, same account, four permissions in the integration guide; retry only failed work |
+| Host sees no events, or `404` for an event | Events belong to the host who created it; an administrator can move one before it has an Immich album. Check the host signed in with the expected identity |
+| Old events missing after upgrade | The first admin OIDC sign-in claims host 1; sign in as the original administrator (or with the password) to see them |
+| Startup error naming the secrets key file | 32 random bytes in base64 (`openssl rand -base64 32`), owner 10001, mode 400; previous keys need an active key |
+| `422 immich_no_account` | The event's host has no account on that Immich server; the host links one under Account, or choose another server |
+| Link result "different person" | The identity provider was signed in as someone else at the Immich step; sign out there and link again |
+| Link result "subject mismatch" | PhotoDrop and Immich use different subject modes; set `PHOTODROP_IMMICH_<KEY>_LINK_MATCH=email` (needs `email_verified`) |
+| Link result "didn't finish" | The host needs an existing Immich account (Auto Register off), Immich 3.4.2+, OAuth enabled, the exact redirect URI on the Immich client, and a secrets key |
+| Account "needs relinking" | Immich rejected the stored key or it was replaced; relink from Account. Network errors never change this state |
 | Export error | New output directory with writable parent and hard-link support, correct UID, old backend credentials, existing source objects |
 | Migration error | Stop and preserve state/logs; verify target image and original migration checksums, permissions/disk space; restore backup for rollback, never edit history |
 

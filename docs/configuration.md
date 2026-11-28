@@ -23,7 +23,7 @@ application defaults. Empty required values fail startup.
 No separate admin username, session-secret, database URL or TLS-certificate
 variable exists. Event quotas are set in the UI, not environment.
 
-## Native OIDC administrator login
+## Native OIDC sign-in for administrators and hosts
 
 OIDC modes require `PHOTODROP_BASE_URL`: HTTPS public origin, HTTP only for
 localhost/loopback development. Callback is exactly

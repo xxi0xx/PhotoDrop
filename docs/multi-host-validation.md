@@ -373,3 +373,46 @@ defaults (`client_secret_post`).
 
 Gate: VERIFY 1–2, every link-flow unit test, smoke cases 1–7 and a browser run of
 the Account page (met locally); CI pending the PR's checks.
+
+## Phase 5 — Release preparation
+
+Baseline: `main` after PR 42 (`6198ade`). Branch: `multi-host/phase-5-release`.
+This prepares 1.3.0 for the owner, who cuts the release by following
+[the release policy](releases.md). Nothing is tagged or published here.
+
+### Changes
+
+- `CHANGELOG.md`: the `[1.3.0] — 2026-11-28` section with upgrade notes;
+  `[Unreleased]` stays empty.
+- Version references move from 1.2.1 to 1.3.0 (README, install, releases,
+  upgrading, `.env.example`), and `scripts/release.test.mjs` checks the 1.3.0 plan
+  and notes, as in the 1.2.1 release preparation.
+- `docs/upgrading.md`: "v1.2.1 to v1.3.0" with what happens on upgrade (one-time
+  sign-in, sign in as the administrator first, Immich config accounts, link-only
+  targets, rollback) and the operator setup checklist for hosts and Immich linking.
+- Docs pass across the plan's list: README features, install, configuration
+  heading, the Immich guide (stored-credential exception, API scope), backup
+  contents, and troubleshooting rows for hosts, the secrets key and each link
+  result. Architecture, configuration, OIDC, security, backup/restore and upgrading
+  were updated in the earlier phases and re-read here.
+
+### Evidence across all phases (CI on GitHub)
+
+| PR | Content | Merge commit | Checks |
+| --- | --- | --- | --- |
+| 38 | Immich 3.4.2 baseline | `eed1ff3` | all passed |
+| 39 | Hosts and event ownership | `f2929b7` | all passed |
+| 40 | Secrets keyring | `b3e7692` | all passed |
+| 41 | Destination accounts | `1e97388` | all passed |
+| 42 | Linking | `6198ade` | all passed after `0e5ceda` fixed an intermittent restart race in the test proxy (see the commit message) |
+
+`main` CI at `1e97388` passed; at `6198ade` it was still running when this
+section was written.
+
+### Local evidence (2026-11-28, America/Chicago)
+
+`node --test scripts/release.test.mjs` (10) passed with the 1.3.0 notes, and
+`node scripts/check-docs.mjs` and `git diff --check` passed.
+
+Gate: the owner's sign-off on the operator setup checklist in
+[upgrading](upgrading.md#operator-setup-for-hosts-and-immich-linking).

@@ -18,35 +18,101 @@ Use the same overlays throughout. Check logs privately, sign in, verify an exist
 event/public link/counts, then test upload/export. Startup validates checksums and
 applies new migrations transactionally.
 
-## Upgrading to multi-host accounts (next release)
+## v1.2.1 to v1.3.0
 
-Migration 013 adds hosts and event ownership. It needs no configuration change:
+1.3.0 adds hosts: people who sign in through your identity provider, own their
+events, and send them to their own Immich account. Migrations 013 and 014 run at
+startup and need no configuration change. A deployment that sets no host lists
+and no secrets key behaves as before, apart from the one-time sign-in below.
 
-- **Everyone signs in again.** Sessions now name their host, so the migration
+What happens on upgrade:
+
+- **Everyone signs in again.** Sessions now name their host, so migration 013
   resets them. The password credential is kept.
 - **Sign in as the administrator first.** Host 1 is the existing administrator and
-  owns every event created before the upgrade. Password sign-in always uses host 1.
-  The first OIDC sign-in by an identity in the admin lists claims host 1; any later
-  admin identity becomes a separate host. So, with OIDC enabled, sign in with your
-  own admin identity before anyone else does.
-- **Add hosts when ready.** Set `PHOTODROP_OIDC_HOST_GROUPS` (or `_HOST_SUBJECTS`)
-  and recreate PhotoDrop. Hosts see only their own events. Without host lists,
-  PhotoDrop behaves as before.
-- **Immich accounts.** Migration 014 turns each Immich target that has bindings
-  into the administrator's config account and attaches existing bindings to it.
-  Existing albums, imports and automatic import keep working with no steps. A
-  target with a URL but no API key becomes link-only.
-- **Immich account linking.** Hosts can link their own Immich accounts (Account
-  page). It needs Immich 3.4.2 with OAuth through the same identity provider, the
-  redirect URI `<PHOTODROP_BASE_URL>/api/admin/destinations/immich/callback` on the
-  Immich client, and a secrets key. See
-  [linking](export-immich.md#linking-a-hosts-own-immich-account).
-- **Optional secrets key.** Linking hosts' own Immich accounts needs
-  `PHOTODROP_SECRETS_KEY_FILE` (see [configuration](configuration.md#secrets-key-for-linked-accounts)).
-  Back the key file up separately from `/data`. Without it, PhotoDrop runs as before.
+  owns every event created before the upgrade. Password sign-in always uses host 1,
+  which stays an administrator while password sign-in is enabled. The first OIDC
+  sign-in by an identity in the admin lists claims host 1; any later admin identity
+  becomes a separate host. With OIDC enabled, sign in with your own admin identity
+  before anyone else does.
+- **Existing Immich setups keep working.** Migration 014 turns each Immich target
+  that has bindings into the administrator's *config account* and attaches existing
+  bindings to it. Albums, imports and automatic import continue with no steps. A
+  target with a URL but no API key becomes link-only: events can no longer be bound
+  to it until a host links an account there.
 
-Rollback after the upgrade needs the stopped pre-upgrade backup: an older binary
-refuses a database with migration 013 applied.
+Rollback needs the stopped pre-upgrade backup: 1.2.1 refuses a database with
+migration 013 or 014 applied.
+
+### Operator setup for hosts and Immich linking
+
+Do these once, after 1.3.0 is running, if you want hosts. Each step links to its
+reference. `drop.example.com` stands for your `PHOTODROP_BASE_URL`.
+
+Identity provider (authentik):
+
+- [ ] On the provider used by **Immich**, add the redirect URI
+      `https://drop.example.com/api/admin/destinations/immich/callback` (strict match).
+- [ ] Compare the **Subject mode** of the PhotoDrop provider and the Immich provider
+      (Applications → Providers → each provider → Advanced protocol settings). If they
+      differ, set `PHOTODROP_IMMICH_<KEY>_LINK_MATCH=email` for that Immich target.
+      If you skip this and they differ, the first link attempt reports a subject
+      mismatch and creates nothing.
+- [ ] If you use `LINK_MATCH=email`, make sure the ID token includes
+      `email_verified: true`; PhotoDrop stores only verified emails.
+- [ ] Create a group such as `photodrop-hosts` and add the hosts. Administrators stay
+      in the existing admin group.
+
+Immich (3.4.2 or later):
+
+- [ ] Upgrade to 3.4.2 or later; older 3.x keeps importing but refuses new links.
+- [ ] Confirm OAuth is enabled and points at the same identity provider.
+- [ ] Turn **Auto Register** off. Linking never creates Immich users; a host without
+      an Immich account is asked to sign in to Immich once first, or to ask the
+      Immich admin to create their account.
+- [ ] Check that each host can already sign in to Immich through the identity provider.
+
+PhotoDrop environment ([configuration](configuration.md#secrets-key-for-linked-accounts)):
+
+- [ ] `PHOTODROP_BASE_URL` is set (it already is when OIDC is enabled).
+- [ ] `PHOTODROP_OIDC_HOST_GROUPS=photodrop-hosts` (or `PHOTODROP_OIDC_HOST_SUBJECTS`).
+- [ ] Leave `PHOTODROP_OIDC_SCOPES` unset, or keep `profile` and `email` in it.
+- [ ] Create the secrets key and deliver it as a Docker secret:
+
+      ```sh
+      mkdir -p secrets
+      openssl rand -base64 32 > secrets/photodrop_secrets_key
+      sudo chown 10001:10001 secrets/photodrop_secrets_key
+      sudo chmod 400 secrets/photodrop_secrets_key
+      ```
+
+      ```yaml
+      services:
+        photodrop:
+          secrets: [photodrop_secrets_key]
+          environment:
+            PHOTODROP_SECRETS_KEY_FILE: /run/secrets/photodrop_secrets_key
+      secrets:
+        photodrop_secrets_key:
+          file: ./secrets/photodrop_secrets_key
+      ```
+
+- [ ] Back the key file up **separately** from `/data`
+      ([backup](backup-restore.md#secrets-key)).
+- [ ] Recreate PhotoDrop. The log says "secrets key loaded"; a key file with the
+      wrong owner or mode stops startup with a message naming the file.
+
+First run:
+
+1. Everyone signs in again.
+2. The administrator signs in first (claims host 1 and keeps all existing events).
+3. A host signs in, opens **Account**, clicks **Link Immich**, and confirms in the
+   identity provider. The page should say "Your Immich account is linked".
+4. The host creates an event with an Immich album and checks that the album
+   appears in their own Immich library.
+
+See [hosts](oidc.md#hosts), [Immich account linking](oidc.md#immich-account-linking)
+and [linking a host's own Immich account](export-immich.md#linking-a-hosts-own-immich-account).
 
 ## v1.2.0 to v1.2.1
 
@@ -88,11 +154,11 @@ and old image, verify, then switch traffic. Schema rollback cannot undo remote d
 
 | Image reference | Meaning |
 | --- | --- |
-| `ghcr.io/xxi0xx/photodrop:1.2.1` | Full release tag; workflow refuses overwrite |
-| `:1.2` | Moving stable patch line |
+| `ghcr.io/xxi0xx/photodrop:1.3.0` | Full release tag; workflow refuses overwrite |
+| `:1.3` | Moving stable patch line |
 | `:1` | Moving stable major line |
 | `:latest` | Most recently promoted stable release, never prerelease |
-| `:1.2.0-rc.1` | Exact prerelease, no moving aliases |
+| `:1.3.0-rc.1` | Exact prerelease, no moving aliases |
 | `ghcr.io/xxi0xx/photodrop@sha256:...` | Immutable manifest digest copied from registry/release |
 
 Prefer a full version or digest for controlled upgrades. Blindly tracking latest
