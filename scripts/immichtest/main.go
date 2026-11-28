@@ -36,7 +36,9 @@ func main() {
 	for _, address := range []string{":18092", ":18093"} {
 		go func() { log.Fatal(http.ListenAndServe(address, s3test.New("http://localhost:8083"))) }()
 	}
-	upstream, _ := url.Parse("http://immich-server:2283")
+	go serveOIDC()
+	// Immich shares this network namespace (see compose-immich-test.yml).
+	upstream, _ := url.Parse("http://localhost:2283")
 	proxy := httputil.NewSingleHostReverseProxy(upstream)
 	var mu sync.Mutex
 	var state faultState

@@ -10,6 +10,9 @@ type Immich struct {
 	URL       string
 	PublicURL string
 	APIKey    string `json:"-"`
+	// LinkMatch is how account linking matches an Immich user to a host:
+	// "subject" (default) compares the identity subject, "email" the verified email.
+	LinkMatch string
 }
 
 func (Immich) String() string     { return "Immich configuration (credentials redacted)" }
@@ -73,6 +76,13 @@ func (c *Config) loadImmich(lookup func(string) (string, bool)) error {
 				return errors.New("Immich PUBLIC_URL must be an http(s) origin without credentials, path, query, or fragment")
 			}
 		}
+		match, _ := lookup(prefix + "LINK_MATCH")
+		if match == "" {
+			match = "subject"
+		}
+		if match != "subject" && match != "email" {
+			return errors.New("PHOTODROP_IMMICH_<KEY>_LINK_MATCH must be subject or email")
+		}
 		secret, _ := lookup(prefix + "API_KEY")
 		if len(secret) > 4096 || strings.ContainsAny(secret, "\x00\r\n") {
 			return errors.New("Immich API key contains invalid characters or is too long")
@@ -80,14 +90,14 @@ func (c *Config) loadImmich(lookup func(string) (string, bool)) error {
 		// Missing credentials may be intentional for a historical target. An
 		// absent URL also defers to its persisted identity without enabling it.
 		if raw == "" && secret == "" {
-			c.ImmichTargets[key] = Immich{PublicURL: public}
+			c.ImmichTargets[key] = Immich{PublicURL: public, LinkMatch: match}
 			continue
 		}
 		base, err := NormalizeImmichURL(raw)
 		if err != nil {
 			return err
 		}
-		c.ImmichTargets[key] = Immich{URL: base, APIKey: secret, PublicURL: public}
+		c.ImmichTargets[key] = Immich{URL: base, APIKey: secret, PublicURL: public, LinkMatch: match}
 	}
 	return nil
 }

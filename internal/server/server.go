@@ -72,6 +72,7 @@ func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS,
 		logger.Warn("Immich config key ignored: the admin has a linked account on this target", "target", key)
 	}
 	imports := immich.New(db, uploads, targets, logger)
+	imports.ConfigureSecrets(keyring)
 	uploads.ConfigureSecurity(cfg.Security)
 	connectSrc := "'self'"
 	origins, err := backends.Origins(ctx)
@@ -105,7 +106,13 @@ func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS,
 		}
 	}
 	app.immich = imports
+	app.db = db
 	app.keyring = keyring
+	app.links = immich.NewProvider(targets, logger)
+	app.linkMatch = map[string]string{}
+	for key, one := range cfg.ImmichTargets {
+		app.linkMatch[key] = one.LinkMatch
+	}
 	app.passwordEnabled = cfg.PasswordEnabled()
 	if cfg.OIDCEnabled() {
 		app.oidc = auth.NewOIDC(db, cfg.OIDC, cfg.BaseURL)

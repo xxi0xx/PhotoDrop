@@ -69,7 +69,8 @@ PhotoDrop keeps one row per identity (issuer plus `sub`) with its role, display
 name and email. The role is derived again at **every** sign-in, so a group change
 takes effect at the next sign-in. Host 1 is the original administrator:
 
-- Password sign-in, where enabled, always signs in host 1.
+- Password sign-in, where enabled, always signs in host 1, and host 1 then stays an
+  administrator whatever lists its OIDC identity is in.
 - After upgrading to multi-host, the **first admin OIDC sign-in claims host 1**.
   That administrator keeps every event created before the upgrade. Sign in as the
   administrator before any other admin does.
@@ -81,6 +82,19 @@ see every host and to disable or enable one; hosts are never deleted. Disabling
 signs that host out at once and blocks further sign-ins; its events stay. Nobody
 can disable their own host. An administrator can move an event to another host
 from the event page, but only before an Immich album exists for it.
+
+### Immich account linking
+
+Hosts link their own Immich accounts through Immich's OAuth sign-in (see
+[linking](export-immich.md#linking-a-hosts-own-immich-account)). On the identity
+provider's client for **Immich**, add the redirect URI
+`https://drop.example.com/api/admin/destinations/immich/callback` (strict match).
+Compare the Subject mode of the PhotoDrop and Immich providers (authentik:
+Applications → Providers → each provider → Advanced protocol settings). If they
+differ, set `PHOTODROP_IMMICH_<KEY>_LINK_MATCH=email`; otherwise the first link
+attempt reports a subject mismatch and creates nothing. A host's email is stored
+only when the ID token says `email_verified: true`, so email matching needs the
+provider to send that claim.
 
 ## Authentik setup
 

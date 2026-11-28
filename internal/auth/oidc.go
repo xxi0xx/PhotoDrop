@@ -202,7 +202,12 @@ func (s *OIDC) Complete(ctx context.Context, state, browser, code string, provid
 		}
 		return ""
 	}
-	result.Email = text("email")
+	// The email is kept only when the provider asserts it is verified: Immich
+	// account linking can match on it (owner decision, 2026-11-28).
+	var verified bool
+	if raw, ok := claims["email_verified"]; ok && json.Unmarshal(raw, &verified) == nil && verified {
+		result.Email = text("email")
+	}
 	result.Name = DisplayName(text("name"), text("preferred_username"), result.Email)
 	return result, nil
 }

@@ -196,7 +196,46 @@ keeps its account for good once its album exists, because the album lives in tha
 Immich user's library. Choosing a target where the owner has no account, including
 the deployment default `PHOTODROP_IMMICH_TARGET`, is refused with
 `422 immich_no_account`; PhotoDrop never falls back to another server or to the
-administrator's key. Hosts link their own accounts in a later release.
+administrator's key.
+
+### Linking a host's own Immich account
+
+A host opens **Account → Link Immich**. PhotoDrop then:
+
+1. asks Immich (3.4.2 or later) to start its own OAuth sign-in, with PhotoDrop's
+   state and PKCE challenge, and checks that the returned identity-provider URL
+   echoes them;
+2. sends the browser to the identity provider, which returns to
+   `${PHOTODROP_BASE_URL}/api/admin/destinations/immich/callback`;
+3. submits that callback URL to Immich, which exchanges the code with the
+   identity provider using **its own** client secret. PhotoDrop never sees a
+   password or the identity provider's tokens, and holds the short Immich session
+   only in memory;
+4. checks that the Immich user is this host: by default Immich's `oauthId` must
+   equal the host's identity subject (`PHOTODROP_IMMICH_<KEY>_LINK_MATCH=subject`);
+   with `LINK_MATCH=email` the Immich email must equal the host's **verified** email;
+5. creates an API key named `PhotoDrop · <PhotoDrop host> · <host name>` with
+   exactly `album.create`, `album.read`, `asset.upload` and `albumAsset.create`,
+   checks it with the key itself, stores it encrypted (see
+   [Secrets key](configuration.md#secrets-key-for-linked-accounts)), and logs the
+   Immich session out.
+
+Each result shows as a fixed message on the Account page. Nothing is created when
+Immich signs in a different person, when another host has already linked that
+Immich user, or when the subject differs but the email matches (the message then
+suggests `LINK_MATCH=email`). **Relink** replaces the key and deletes the old one;
+**Unlink** signs in once more to delete the key in Immich; **Forget** removes it
+locally only and names the key to delete by hand under Immich → Account Settings →
+API Keys. Events already bound to an unlinked account keep their albums but cannot
+import until the host links again.
+
+Requirements: Immich 3.4.2 or later with OAuth enabled against the same identity
+provider; the host must already have an Immich user (keep **Auto Register** off;
+linking never creates Immich users); the identity provider's client for Immich
+must allow the redirect URI above; and PhotoDrop needs `PHOTODROP_BASE_URL` and
+`PHOTODROP_SECRETS_KEY_FILE`. Before every import PhotoDrop checks the stored key:
+if Immich rejects it, or it is no longer the key PhotoDrop created, the account is
+marked **needs relinking**; network errors change nothing.
 
 `PHOTODROP_IMMICH_<KEY>_PUBLIC_URL` is an optional browser origin. It follows the
 same HTTP(S) origin validation, but is not persisted and is not part of immutable

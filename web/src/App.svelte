@@ -8,7 +8,7 @@
 <div class="page">
   <header class="site-header"><a class="brand" href="/" aria-label="PhotoDrop home"><img src="/favicon.svg" width="32" height="32" alt="" /><span>PhotoDrop</span></a>{#if path.startsWith('/admin')}<span class="muted">Administration</span>{/if}</header>
   {#if path === '/admin/login'}<Login />
-  {:else if path === '/admin' || path === '/admin/' || path === '/admin/hosts' || /^\/admin\/events\/[^/]+$/.test(path)}<Admin {path} />
+  {:else if path === '/admin' || path === '/admin/' || path === '/admin/hosts' || path === '/admin/account' || /^\/admin\/events\/[^/]+$/.test(path)}<Admin {path} />
   {:else if /^\/e\/[^/]+$/.test(path)}<Guest publicID={path.split('/')[2]} />
   {:else if path === '/'}
     <main class="home-content">

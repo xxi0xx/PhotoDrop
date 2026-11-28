@@ -15,6 +15,7 @@ import (
 	"photodrop/internal/destinations"
 	"photodrop/internal/events"
 	"photodrop/internal/media"
+	"photodrop/internal/secrets"
 )
 
 var ErrInput = errors.New("choose a configured target, new or retry mode, and an album name of at most 200 characters")
@@ -23,6 +24,7 @@ var ErrActive = errors.New("an import job is already queued or running for this 
 type Service struct {
 	db             *sql.DB
 	media          *media.Service
+	keyring        *secrets.Keyring // decrypts linked accounts; nil means none
 	targets        *Targets
 	logger         *slog.Logger
 	runMu          sync.Mutex
@@ -118,7 +120,7 @@ func (s *Service) Status(ctx context.Context, eventID int64, key string) (Status
 	if err != nil {
 		return result, err
 	}
-	t = t.withAccount(account)
+	t = s.withAccount(t, account)
 	result.Target = &t
 	var importID int64
 	err = s.db.QueryRowContext(ctx, "SELECT id,album_name,COALESCE(immich_album_id,''),album_state,auto_import FROM immich_event_imports WHERE event_id=? AND target_id=?", eventID, t.ID).Scan(&importID, &result.AlbumName, &result.AlbumID, &result.AlbumState, &result.AutoImport)
@@ -335,6 +337,11 @@ func (s *Service) Run(ctx context.Context) {
 		return
 	}
 	defer s.runMu.Unlock()
+	// Linked credentials are validated once in the background at startup; the
+	// worker does not wait for it, but Run does not return before it finishes.
+	var background sync.WaitGroup
+	background.Go(func() { s.ValidateLinked(ctx) })
+	defer background.Wait()
 	// Only one PhotoDrop server may own /data. The export CLI starts no worker.
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()

@@ -37,6 +37,19 @@ Immich operations on an event always use the event owner's destination account,
 even when an administrator acts; a target where the owner has no account is refused
 with `422 immich_no_account`, never served by another account.
 
+Account linking never handles Immich or identity-provider passwords. PhotoDrop
+starts Immich's OAuth sign-in with its own state and PKCE challenge, rejects an
+authorize URL that does not echo them (or is not HTTPS, except on loopback), and
+binds the transaction to the browser (`photodrop_link`, HttpOnly, SameSite=Lax,
+five minutes) and to the signed-in session. The callback is consumed atomically;
+replays, other browsers, other sessions and duplicate parameters fail. The short
+Immich session lives only in memory and is logged out on every exit path. The
+Immich user must match the host (subject, or verified email with
+`LINK_MATCH=email`), must not belong to another account, and gets a key with
+exactly four permissions that is checked with the key itself before being stored.
+Anything created remotely is deleted if a later step fails. Responses from Immich
+are size-bounded and every outcome maps to a fixed message.
+
 ## Stored credentials
 
 Keys configured in the environment never touch SQLite. The one exception, for hosts

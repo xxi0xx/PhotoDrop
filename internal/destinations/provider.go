@@ -29,15 +29,36 @@ type LinkRequest struct {
 	Challenge   string // PKCE S256 code challenge
 }
 
-// LinkTransaction is the consumed, browser-bound state of a link or unlink.
+// LinkTransaction is the consumed, browser-bound state of a link or unlink,
+// plus what the provider needs to verify identity. The registry supplies Check
+// and Store, so the provider never touches SQLite or the keyring while still
+// running them inside the remote session they depend on.
 type LinkTransaction struct {
 	Purpose   string // "link" or "unlink"
 	HostID    int64
 	TargetKey string
-	AccountID int64
+	AccountID int64 // the account being relinked or unlinked; 0 for a new link
 	State     string
 	Verifier  string
+
+	// Identity matching (link step 7).
+	MatchMode            string // "subject" or "email"
+	HostSubject          string
+	HostEmail            string // verified email, or ""
+	ExpectedRemoteUserID string // relink and unlink: the stored remote user
+
+	KeyName              string // name for the minted API key
+	PreviousCredentialID string // relink: the old remote key, deleted after Store
+
+	// Check rejects a remote user another live account already holds (step 8).
+	Check func(ctx context.Context, remoteUserID string) error
+	// Store persists the verified credential (step 11). If it fails, the
+	// provider deletes the key it minted before returning the error.
+	Store func(ctx context.Context, linked Linked) error
 }
+
+func (LinkTransaction) String() string     { return "destination link transaction (redacted)" }
+func (t LinkTransaction) GoString() string { return t.String() }
 
 // Linked is a verified remote identity plus the credential to store.
 type Linked struct {
@@ -54,5 +75,13 @@ type Status struct {
 	Reason string // a fixed, safe string when not valid
 }
 
-// ErrLinkUnsupported is returned by providers or deployments that cannot link.
-var ErrLinkUnsupported = errors.New("linking is not available for this destination")
+// Link outcomes. Each maps to one fixed result code shown to the host.
+var (
+	ErrLinkUnsupported = errors.New("linking is not available for this destination")
+	ErrLinkFailed      = errors.New("linking could not be completed")
+	ErrWrongUser       = errors.New("the Immich user does not belong to this host")
+	ErrSubjectMismatch = errors.New("the Immich user matches by email but not by identity subject")
+	ErrInUse           = errors.New("this Immich user is already linked to another account")
+	ErrLinkVersion     = errors.New("this Immich server is too old for account linking")
+	ErrLinkSecretsKey  = errors.New("secrets key not configured")
+)

@@ -34,10 +34,11 @@ func TestOIDCRoleDerivationAdminWinsAndProfileClaims(t *testing.T) {
 		role  string // "" means denied
 		label string
 	}{
-		{"admin group", oidctest.Faults{Groups: []string{"photodrop-admins"}, Name: "Ada Admin", Email: "ada@example.test"}, RoleAdmin, "Ada Admin"},
+		{"admin group", oidctest.Faults{Groups: []string{"photodrop-admins"}, Name: "Ada Admin", Email: "ada@example.test", EmailVerified: true}, RoleAdmin, "Ada Admin"},
 		{"admin wins over host", oidctest.Faults{Groups: []string{"photodrop-hosts", "photodrop-admins"}}, RoleAdmin, "Host"},
 		{"host group", oidctest.Faults{Subject: "host-a", Groups: []string{"photodrop-hosts"}, PreferredUsername: "hosta"}, RoleHost, "hosta"},
-		{"host subject", oidctest.Faults{Subject: "listed-host", Groups: []string{}, Email: "listed@example.test"}, RoleHost, "listed@example.test"},
+		{"host subject", oidctest.Faults{Subject: "listed-host", Groups: []string{}, Email: "listed@example.test", EmailVerified: true}, RoleHost, "listed@example.test"},
+		{"unverified email is dropped", oidctest.Faults{Subject: "listed-host", Groups: []string{}, Email: "unverified@example.test"}, RoleHost, "Host"},
 		{"no list matches", oidctest.Faults{Subject: "stranger", Groups: []string{"other"}}, "", ""},
 		{"removed from every group", oidctest.Faults{Subject: "host-a", Groups: []string{}}, "", ""},
 	} {
@@ -53,7 +54,7 @@ func TestOIDCRoleDerivationAdminWinsAndProfileClaims(t *testing.T) {
 		if err != nil || id.Role != tc.role || id.Name != tc.label || id.Issuer != s.cfg.Issuer || id.Subject == "" {
 			t.Fatalf("%s: got %+v %v", tc.name, id, err)
 		}
-		if tc.fault.Email != "" && id.Email != tc.fault.Email {
+		if wantEmail := map[bool]string{true: tc.fault.Email}[tc.fault.EmailVerified]; id.Email != wantEmail {
 			t.Fatalf("%s: email %q", tc.name, id.Email)
 		}
 	}
@@ -187,5 +188,31 @@ func TestHostSessionsDisableAndPasswordRotation(t *testing.T) {
 	hosts, err := m.Hosts(t.Context())
 	if err != nil || len(hosts) != 2 || !hosts[0].Password || hosts[0].OIDC || !hosts[1].OIDC || hosts[1].Password || hosts[1].DisplayName != "Host X" {
 		t.Fatalf("host list %+v %v", hosts, err)
+	}
+}
+
+// While password sign-in is enabled, host 1 stays the administrator even if its
+// OIDC identity is later only in the host lists. Without a password, the role
+// follows the identity like any other host.
+func TestHostOneKeepsAdminWhilePasswordSignInIsEnabled(t *testing.T) {
+	db, m := hostsDB(t)
+	const issuer = "https://idp.test/"
+	if id, err := m.ResolveHost(t.Context(), Identity{Issuer: issuer, Subject: "owner", Role: RoleAdmin}); err != nil || id != PasswordHostID {
+		t.Fatal("claim", id, err)
+	}
+	role := func() string {
+		var r string
+		db.QueryRow("SELECT role FROM hosts WHERE id = 1").Scan(&r)
+		return r
+	}
+	if _, err := m.ResolveHost(t.Context(), Identity{Issuer: issuer, Subject: "owner", Role: RoleHost}); err != nil || role() != RoleAdmin {
+		t.Fatal("host 1 lost admin while password sign-in is enabled", role(), err)
+	}
+	if _, session, err := m.Login(t.Context(), "host-test-password", ""); err != nil || !session.Admin() {
+		t.Fatal("password sign-in is not admin", session.Host, err)
+	}
+	oidcOnly := NewSessionOnly(db)
+	if _, err := oidcOnly.ResolveHost(t.Context(), Identity{Issuer: issuer, Subject: "owner", Role: RoleHost}); err != nil || role() != RoleHost {
+		t.Fatal("without password sign-in, host 1's role must follow its identity", role(), err)
 	}
 }

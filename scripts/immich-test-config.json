@@ -1,3 +1,14 @@
 {
-  "machineLearning": { "enabled": false }
+  "machineLearning": { "enabled": false },
+  "oauth": {
+    "enabled": true,
+    "issuerUrl": "http://localhost:18997/application/o/drop/",
+    "clientId": "immich-test",
+    "clientSecret": "disposable-immich-client-secret",
+    "scope": "openid email profile",
+    "tokenEndpointAuthMethod": "client_secret_post",
+    "autoRegister": false,
+    "allowInsecureRequests": true,
+    "buttonText": "Sign in with the test identity provider"
+  }
 }

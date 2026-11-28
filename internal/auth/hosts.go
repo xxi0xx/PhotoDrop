@@ -94,7 +94,13 @@ func (m *Manager) ResolveHost(ctx context.Context, id Identity) (int64, error) {
 		if disabled {
 			return 0, ErrHostDisabled
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE hosts SET role = ?, email = ?, display_name = ?, last_login_at = ? WHERE id = ?", id.Role, email, name, now, hostID); err != nil {
+		role := id.Role
+		// While password sign-in is enabled, host 1 is the administrator whatever
+		// lists its OIDC identity is in (owner decision, 2026-11-28).
+		if hostID == PasswordHostID && len(m.passwordHash) > 0 {
+			role = RoleAdmin
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE hosts SET role = ?, email = ?, display_name = ?, last_login_at = ? WHERE id = ?", role, email, name, now, hostID); err != nil {
 			return 0, fmt.Errorf("refresh host: %w", err)
 		}
 	case errors.Is(err, sql.ErrNoRows):
@@ -187,4 +193,34 @@ func (m *Manager) SetDisabled(ctx context.Context, actor, hostID int64, disabled
 		}
 	}
 	return tx.Commit()
+}
+
+// TokenHash is the stored digest of an opaque token. Account linking binds its
+// transactions to the signing-in session by this digest, never the token.
+func TokenHash(token string) string { return tokenHash(token) }
+
+// RandomToken returns 256 random bits, base64url-encoded.
+func RandomToken() string { return randomToken() }
+
+// LinkIdentity is what account linking matches an Immich user against.
+type LinkIdentity struct {
+	Subject, Email, DisplayName string
+}
+
+func (LinkIdentity) String() string { return "host link identity (redacted)" }
+
+// HostLinkIdentity returns a host's OIDC subject, verified email and name.
+func (m *Manager) HostLinkIdentity(ctx context.Context, hostID int64) (LinkIdentity, error) {
+	var id LinkIdentity
+	var subject, email *string
+	if err := m.db.QueryRowContext(ctx, "SELECT oidc_subject, email, display_name FROM hosts WHERE id = ? AND disabled = 0", hostID).Scan(&subject, &email, &id.DisplayName); err != nil {
+		return LinkIdentity{}, err
+	}
+	if subject != nil {
+		id.Subject = *subject
+	}
+	if email != nil {
+		id.Email = *email
+	}
+	return id, nil
 }
