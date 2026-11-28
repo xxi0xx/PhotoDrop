@@ -181,6 +181,16 @@ try {
     expected.schema_migrations=after.schema_migrations;
     if(oldMigrations.length<10)for(const binding of expected.immich_event_imports) binding.auto_import=0;
     if(oldMigrations.length<13)for(const event of expected.events) event.owner_host_id=1; // Host 1 owns pre-existing events.
+    if(oldMigrations.length<14){
+      // Migration 014: the bound target gets host 1's config account, and the binding uses it.
+      const accounts=after.destination_accounts??[];
+      assert.equal(accounts.length,1);
+      assert.equal(accounts[0].host_id,1);assert.equal(accounts[0].immich_target_id,1);
+      assert.equal(accounts[0].credential_source,'config');assert.equal(accounts[0].status,'active');
+      assert.equal(accounts[0].credential_ciphertext,null);
+      for(const binding of expected.immich_event_imports) binding.account_id=accounts[0].id;
+      expected.destination_accounts=accounts;
+    }
     if(oldMigrations.length<12){
       for(const event of expected.events) for(const field of typedFields) event[field]=null;
       for(const asset of expected.assets){const mime=asset.status==='ready'?asset.mime_type:asset.expected_mime_type;asset.media_class=mime?.startsWith('video/')?'video':mime?.startsWith('image/')?'photo':null;}

@@ -34,7 +34,10 @@ func TestEventProvisioningAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Config{DataDir: dir, BaseURL: "http://drop.test", AdminPassword: "provision-test-admin-password", ImmichTarget: "home", ImmichTargets: map[string]config.Immich{
-		"home":    {URL: remote.URL, APIKey: "test-only-private-key", PublicURL: "https://photos.example.test"},
+		"home": {URL: remote.URL, APIKey: "test-only-private-key", PublicURL: "https://photos.example.test"},
+		// A second keyed target never contacted during creation.
+		"second": {URL: "http://second.invalid", APIKey: "test-only-second-key"},
+		// URL without a key: a link-only server where nobody has an account yet.
 		"offline": {URL: "http://offline.invalid"},
 	}}
 	srv, err := New(t.Context(), cfg, db, assets, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -69,10 +72,10 @@ func TestEventProvisioningAPI(t *testing.T) {
 	if err := json.Unmarshal(catalog.Body.Bytes(), &targets); err != nil || catalog.Code != 200 || len(targets.Targets) != 2 || targets.ActiveTarget != "home" {
 		t.Fatal(catalog.Body.String(), err)
 	}
-	if strings.Contains(catalog.Body.String(), remote.URL) || strings.Contains(catalog.Body.String(), "private-key") || strings.Contains(catalog.Body.String(), "offline.invalid") {
+	if strings.Contains(catalog.Body.String(), remote.URL) || strings.Contains(catalog.Body.String(), "private-key") || strings.Contains(catalog.Body.String(), "offline") || strings.Contains(catalog.Body.String(), "second.invalid") {
 		t.Fatal("unsafe discovery", catalog.Body.String())
 	}
-	for _, setup := range []string{"", `,"immich":{"target":"home","album_name":"Early album","auto_import":true}`, `,"immich":{"target":"offline","album_name":"Unavailable"}`} {
+	for _, setup := range []string{"", `,"immich":{"target":"home","album_name":"Early album","auto_import":true}`, `,"immich":{"target":"second","album_name":"Second server"}`} {
 		started := time.Now()
 		w := call("POST", "/api/admin/events", `{"name":"Event","enabled":true`+setup+`}`)
 		if w.Code != 201 || time.Since(started) > time.Second || calls.Load() != 0 {
@@ -121,7 +124,7 @@ func TestEventProvisioningAPI(t *testing.T) {
 	w := call("GET", "/api/admin/events/3/immich", "")
 	var status immich.Status
 	json.Unmarshal(w.Body.Bytes(), &status)
-	if status.Target == nil || status.Target.Key != "offline" || status.Target.Available || status.AutoImport || status.Job.Status != "queued" {
+	if status.Target == nil || status.Target.Key != "second" || !status.Target.Available || status.Target.Account == nil || status.AutoImport || status.Job.Status != "queued" {
 		t.Fatal(w.Body.String())
 	}
 	if w := call("POST", "/api/admin/events/1/immich/album", `{"target":"home","album_name":"Existing empty event"}`); w.Code != 202 {
@@ -129,6 +132,19 @@ func TestEventProvisioningAPI(t *testing.T) {
 	}
 	if w := call("POST", "/api/admin/events", `{"name":"Bad","enabled":true,"immich":{"target":"missing"}}`); w.Code < 400 {
 		t.Fatal("unknown target accepted")
+	}
+	// A link-only server where the owner has no account: refused, no event made.
+	var before, after int
+	db.QueryRow("SELECT count(*) FROM events").Scan(&before)
+	if w := call("POST", "/api/admin/events", `{"name":"No account","enabled":true,"immich":{"target":"offline","album_name":"x"}}`); w.Code != 422 || !strings.Contains(w.Body.String(), "immich_no_account") {
+		t.Fatal("event bound to a target without an owner account", w.Code, w.Body.String())
+	}
+	db.QueryRow("SELECT count(*) FROM events").Scan(&after)
+	if after != before {
+		t.Fatal("refused Immich setup still created the event")
+	}
+	if w := call("POST", "/api/admin/events/1/immich/album", `{"target":"offline","album_name":"x"}`); w.Code != 422 || !strings.Contains(w.Body.String(), "immich_no_account") {
+		t.Fatal("album on a target without an owner account", w.Code, w.Body.String())
 	}
 	if w := call("POST", "/api/admin/events", `{"name":"Bad","enabled":true,"immich":{"target":"home","album_name":"bad\nname"}}`); w.Code != 422 {
 		t.Fatal(w.Body.String())

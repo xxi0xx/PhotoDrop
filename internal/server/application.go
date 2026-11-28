@@ -18,6 +18,7 @@ import (
 	"photodrop/internal/abuse"
 	"photodrop/internal/auth"
 	"photodrop/internal/config"
+	"photodrop/internal/destinations"
 	"photodrop/internal/events"
 	"photodrop/internal/integrations/immich"
 	"photodrop/internal/media"
@@ -533,7 +534,7 @@ func (a *application) createEvent(w http.ResponseWriter, r *http.Request, s auth
 		e, err = a.immich.CreateEvent(r.Context(), s.Host.ID, input.Input, input.Immich.Target, input.Immich.AlbumName, input.Immich.AutoImport)
 	}
 	if err != nil {
-		if errors.Is(err, immich.ErrInput) || errors.Is(err, immich.ErrCredentials) {
+		if errors.Is(err, immich.ErrInput) || errors.Is(err, immich.ErrCredentials) || errors.Is(err, destinations.ErrNoAccount) {
 			a.immichFailure(w, err)
 			return
 		}

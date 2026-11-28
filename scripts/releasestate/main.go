@@ -55,7 +55,17 @@ VALUES(1,'completed','new','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z');`)
 	result := map[string][]map[string]any{}
 	// Excludes credentials/admin session identifiers from output. HTTP checks test
 	// the preserved admin session separately without logging it.
-	for _, table := range []string{"events", "assets", "storage_backends", "schema_migrations", "immich_targets", "immich_event_imports", "immich_asset_imports", "integration_jobs"} {
+	tables := []string{"events", "assets", "storage_backends", "schema_migrations", "immich_targets", "immich_event_imports", "immich_asset_imports", "integration_jobs"}
+	// destination_accounts exists from migration 014. Its credential columns are
+	// always NULL for config accounts, which are all a release fixture can hold.
+	var accounts bool
+	if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='destination_accounts')").Scan(&accounts); err != nil {
+		panic(err)
+	}
+	if accounts {
+		tables = append(tables, "destination_accounts")
+	}
+	for _, table := range tables {
 		rows, err := db.Query("SELECT * FROM " + table + " ORDER BY rowid")
 		if err != nil {
 			panic(err)

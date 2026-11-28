@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"photodrop/internal/auth"
+	"photodrop/internal/config"
 	"photodrop/internal/events"
+	"photodrop/internal/integrations/immich"
 	"photodrop/internal/testutil/oidctest"
 )
 
@@ -188,8 +190,9 @@ func TestOwnershipTransferRules(t *testing.T) {
 		}
 	}
 	exec(`INSERT INTO immich_targets(id,key,base_url,created_at) VALUES(1,'home','https://immich.test','old')`)
+	exec(`INSERT INTO destination_accounts(id,provider,host_id,immich_target_id,credential_source,status,created_at,updated_at) VALUES(1,'immich',1,1,'config','active','old','old')`)
 	// A queued job blocks the transfer.
-	exec(`INSERT INTO immich_event_imports(id,event_id,target_id,album_name,album_marker,album_state,created_at,updated_at) VALUES(1,?,1,'Transfer','marker-new','new','old','old')`, e.ID)
+	exec(`INSERT INTO immich_event_imports(id,event_id,target_id,account_id,album_name,album_marker,album_state,created_at,updated_at) VALUES(1,?,1,1,'Transfer','marker-new','new','old','old')`, e.ID)
 	exec(`INSERT INTO integration_jobs(event_import_id,status,mode,created_at) VALUES(1,'queued','new','old')`)
 	if code, body := f.as(admin, "PUT", path, to(hostB.session.Host.ID)); code != 409 || !strings.Contains(body, "immich_active") {
 		t.Fatal("transfer with a queued job", code, body)
@@ -215,7 +218,7 @@ func TestOwnershipTransferRules(t *testing.T) {
 	// Once an album exists in the owner's Immich account, the owner is fixed.
 	for _, state := range []string{"creating", "ready"} {
 		exec(`DELETE FROM immich_event_imports`)
-		exec(`INSERT INTO immich_event_imports(event_id,target_id,album_name,album_marker,album_state,created_at,updated_at) VALUES(?,1,'Transfer','marker-`+state+`',?,'old','old')`, e.ID, state)
+		exec(`INSERT INTO immich_event_imports(event_id,target_id,account_id,album_name,album_marker,album_state,created_at,updated_at) VALUES(?,1,1,'Transfer','marker-`+state+`',?,'old','old')`, e.ID, state)
 		if code, body := f.as(admin, "PUT", path, to(hostA.session.Host.ID)); code != 409 || !strings.Contains(body, "owner_locked") {
 			t.Fatal("transfer with album state", state, code, body)
 		}
@@ -286,5 +289,79 @@ func TestHostAdministrationAndRemovedUsers(t *testing.T) {
 	}
 	if strings.Contains(f.logs.String(), "a@example.test") {
 		t.Fatal("email logged")
+	}
+}
+
+// Rule 3: Immich work on an event always uses the event owner's account, even
+// when an admin acts, and the default target never falls back to another
+// server or to the admin's config account.
+func TestImmichUsesTheEventOwnersAccount(t *testing.T) {
+	f := newHostsFixture(t)
+	f.cfg.ImmichTarget = "home"
+	f.cfg.ImmichTargets = map[string]config.Immich{"home": {URL: "http://127.0.0.1:1", APIKey: "test-only-config-key"}}
+	f.restart()
+	admin := f.signIn(oidctest.Faults{})
+	host := f.signIn(oidctest.Faults{Subject: "host-a", Groups: []string{"photodrop-hosts"}})
+	catalog := func(a actor) immich.TargetCatalog {
+		t.Helper()
+		code, body := f.as(a, "GET", "/api/admin/immich/targets", "")
+		var out immich.TargetCatalog
+		if code != 200 || json.Unmarshal([]byte(body), &out) != nil {
+			t.Fatal("catalog", code, body)
+		}
+		return out
+	}
+	if got := catalog(admin); len(got.Targets) != 1 || !got.Targets[0].Available || got.ActiveTarget != "home" || got.Targets[0].Account == nil || got.Targets[0].Account.Source != "config" {
+		t.Fatalf("admin catalog %+v", got)
+	}
+	if got := catalog(host); len(got.Targets) != 0 || got.ActiveTarget != "" {
+		t.Fatalf("host saw the admin's config account: %+v", got)
+	}
+	var events int
+	count := func() int { f.db.QueryRow("SELECT count(*) FROM events").Scan(&events); return events }
+	before := count()
+	for _, target := range []string{"home", ""} {
+		code, body := f.as(host, "POST", "/api/admin/events", `{"name":"Host event","enabled":true,"immich":{"target":"`+target+`","album_name":"x"}}`)
+		if code != 422 || !strings.Contains(body, "immich_no_account") {
+			t.Fatal("host bound the admin's account", target, code, body)
+		}
+	}
+	if count() != before {
+		t.Fatal("refused Immich setup created an event")
+	}
+	hostEvent := f.createEvent(host, "Host event")
+	path := routePath("/api/admin/events/{id}/immich", hostEvent.ID)
+	for _, a := range []actor{host, admin} {
+		for _, call := range []struct{ method, suffix, body string }{
+			{"POST", "/album", `{"target":"home","album_name":"x"}`},
+			{"POST", "/jobs", `{"target":"home","mode":"new"}`},
+			{"POST", "/test", `{"target":"home"}`},
+		} {
+			code, body := f.as(a, call.method, path+call.suffix, call.body)
+			if code != 422 || !strings.Contains(body, "immich_no_account") {
+				t.Fatalf("%s %s on a host's event used another account: %d %s", a.session.Host.Role, call.suffix, code, body)
+			}
+		}
+		code, body := f.as(a, "GET", path, "")
+		var status immich.Status
+		if code != 200 || json.Unmarshal([]byte(body), &status) != nil || len(status.Targets) != 0 || status.Target != nil || status.ActiveTarget != "" {
+			t.Fatal("status showed targets the owner has no account on", code, body)
+		}
+	}
+	var bindings int
+	f.db.QueryRow("SELECT count(*) FROM immich_event_imports").Scan(&bindings)
+	if bindings != 0 {
+		t.Fatal("a binding was created without an owner account")
+	}
+	// The admin's own event uses the admin's config account.
+	adminEvent := f.createEvent(admin, "Admin event")
+	if code, body := f.as(admin, "POST", routePath("/api/admin/events/{id}/immich/album", adminEvent.ID), `{"target":"home","album_name":"x"}`); code != 202 {
+		t.Fatal("admin provisioning", code, body)
+	}
+	var account int64
+	var source string
+	f.db.QueryRow("SELECT a.id, a.credential_source FROM immich_event_imports i JOIN destination_accounts a ON a.id=i.account_id WHERE i.event_id=? AND a.host_id=1", adminEvent.ID).Scan(&account, &source)
+	if account == 0 || source != "config" {
+		t.Fatal("admin binding is not on the admin's config account", account, source)
 	}
 }

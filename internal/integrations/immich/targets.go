@@ -3,23 +3,32 @@ package immich
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
 
 	"photodrop/internal/config"
+	"photodrop/internal/destinations"
 )
 
+// Target is an Immich server as one host sees it: Available and Account
+// describe that host's account there.
 type Target struct {
-	ID        int64  `json:"id"`
-	Key       string `json:"key"`
-	Available bool   `json:"available"`
-	PublicURL string `json:"public_url,omitempty"`
-	client    API
+	ID        int64                `json:"id"`
+	Key       string               `json:"key"`
+	Available bool                 `json:"available"`
+	PublicURL string               `json:"public_url,omitempty"`
+	Account   *destinations.Public `json:"account,omitempty"`
+	client    API                  // the config account's client, when its key is configured
+	base      string               // normalized API origin; never serialized
 }
 type Targets struct {
 	ActiveKey string
-	entries   map[int64]Target
+	// Ignored lists target keys whose configured API key was ignored because
+	// host 1 already has a linked account on that target.
+	Ignored []string
+	entries map[int64]Target
 }
 
 func Reconcile(ctx context.Context, db *sql.DB, cfg config.Config) (*Targets, error) {
@@ -68,6 +77,7 @@ func Reconcile(ctx context.Context, db *sql.DB, cfg config.Config) (*Targets, er
 			rows.Close()
 			return nil, err
 		}
+		t.base = base
 		one := cfg.ImmichTargets[t.Key]
 		if one.PublicURL != "" {
 			t.PublicURL, err = config.NormalizeImmichURL(one.PublicURL)
@@ -83,7 +93,6 @@ func Reconcile(ctx context.Context, db *sql.DB, cfg config.Config) (*Targets, er
 				return nil, err
 			}
 			t.client = client
-			t.Available = true
 		}
 		result.entries[t.ID] = t
 	}
@@ -92,11 +101,29 @@ func Reconcile(ctx context.Context, db *sql.DB, cfg config.Config) (*Targets, er
 	if err != nil {
 		return nil, err
 	}
+	// Config accounts follow configured keys. A missing key never changes a row.
+	ids := make([]int64, 0, len(result.entries))
+	for id := range result.entries {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, id := range ids {
+		t := result.entries[id]
+		ignored, err := destinations.ReconcileConfig(ctx, tx, t.ID, t.client != nil)
+		if err != nil {
+			return nil, err
+		}
+		if ignored {
+			result.Ignored = append(result.Ignored, t.Key)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
+
+// ByKey finds a target; an empty key means the deployment default.
 func (t *Targets) ByKey(key string) (Target, error) {
 	if key == "" {
 		key = t.ActiveKey
@@ -114,21 +141,60 @@ type TargetCatalog struct {
 	Targets      []Target `json:"targets"`
 }
 
-// Discovery is local configuration only, not a health probe. Internal API URLs
-// and credentials never appear in Target's JSON representation.
-func (s *Service) TargetCatalog() TargetCatalog {
-	result := TargetCatalog{ActiveTarget: s.targets.ActiveKey, Targets: []Target{}}
+// usable reports whether an account can make Immich requests now. Linked
+// accounts need the credential flow, which this deployment does not run yet.
+func (t Target) usable(a destinations.Account) bool {
+	return a.Status == destinations.StatusActive && a.Source == destinations.SourceConfig && t.client != nil
+}
+
+// withAccount is the target as seen through one account.
+func (t Target) withAccount(a destinations.Account) Target {
+	public := a.Public()
+	t.Account = &public
+	t.Available = t.usable(a)
+	return t
+}
+
+// TargetCatalog lists the targets where a host has a live account. Discovery is
+// local configuration only, not a health probe. Internal API URLs and
+// credentials never appear in Target's JSON representation. The default target
+// is reported only when the host can use it.
+func (s *Service) TargetCatalog(ctx context.Context, hostID int64) (TargetCatalog, error) {
+	accounts, err := destinations.ForHost(ctx, s.db, hostID)
+	if err != nil {
+		return TargetCatalog{}, err
+	}
+	result := TargetCatalog{Targets: []Target{}}
 	for _, one := range s.targets.entries {
-		result.Targets = append(result.Targets, one)
+		if a, ok := accounts[one.ID]; ok {
+			view := one.withAccount(a)
+			result.Targets = append(result.Targets, view)
+			if view.Key == s.targets.ActiveKey && view.Available {
+				result.ActiveTarget = view.Key
+			}
+		}
 	}
 	sort.Slice(result.Targets, func(i, j int) bool { return result.Targets[i].Key < result.Targets[j].Key })
-	return result
+	return result, nil
 }
-func (t *Targets) client(id int64) (API, error) {
-	one, ok := t.entries[id]
-	if !ok || one.client == nil {
+
+// accountClient resolves the Immich client for an account. Only active config
+// accounts with a configured key have one in this release.
+// q must be the open transaction when the caller holds one: the database has a
+// single connection.
+func (s *Service) accountClient(ctx context.Context, q rowQuerier, accountID int64) (API, error) {
+	a, err := destinations.Get(ctx, q, accountID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrCredentials
 	}
-	return one.client, nil
+	if err != nil {
+		return nil, err
+	}
+	t, ok := s.targets.entries[a.TargetID]
+	if !ok || !t.usable(a) {
+		return nil, ErrCredentials
+	}
+	return t.client, nil
 }
+
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }

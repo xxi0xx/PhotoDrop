@@ -210,3 +210,64 @@ migration; nothing user-visible changes.
 Gate: the secrets unit tests pass, and startup with no key, a bad key and an
 over-permissive key file behaves as specified (met locally); CI pending the PR's
 checks.
+
+## Phase 3 — Destination accounts
+
+Baseline: `main` after PR 40 (`b3e7692`). Branch: `multi-host/phase-3-accounts`.
+
+### Changes
+
+- Migration `014_destination_accounts.sql`: `destination_accounts`, link
+  transactions, and `immich_event_imports.account_id` with the plan's triggers.
+  Config accounts (host 1) are created only for targets that have bindings, as
+  revised in the plan; every existing binding is backfilled.
+- `immich.Reconcile` applies the config-account rules: a configured key creates
+  host 1's account once; a URL-only target is link-only; a removed key leaves the
+  row unchanged and unusable; a key where host 1 has linked is ignored with a fixed
+  warning.
+- Every Immich call resolves its client from an account: the worker from the
+  binding's `account_id`; `Test`, provisioning and new jobs from the binding's
+  account or else the event owner's live account (invariant 3). No owner account
+  is `422 immich_no_account`. The default target never falls back.
+- Target lists (`GET /api/admin/immich/targets`, `GET …/events/{id}/immich`) show
+  only targets where the caller (or the event owner) has a live account, each with
+  `account {id, provider, source, remote_email, status}`. `active_target` appears
+  only when usable.
+- `internal/destinations`: the `Provider` interface and account store. Immich's
+  provider validates credentials (a rejected key is a status, a transport or 5xx
+  failure an error); linking reports "not available" until phase 4.
+- `rotate-secrets` now always uses the real table; its "no table yet" branch is
+  gone.
+- Web: the empty Immich section explains that the event's host has no account.
+- Docs: export and Immich (whose account an event uses), configuration,
+  architecture, security and upgrading.
+
+### Local evidence (2026-11-27, America/Chicago)
+
+- `node scripts/smoke-release.mjs` passed (upgrade and destructive restore from the
+  merged migration-012 baseline). It now also asserts the backfill: one active
+  config account for host 1 on the bound target, no stored credential, and the
+  existing binding's `account_id` pointing at it; every other table is unchanged.
+- `node scripts/smoke-immich.mjs` against Immich v3.4.2 passed unchanged ("Real Immich
+  Gate 6 integration suite passed."): provisioning, manual and automatic import,
+  retries, restart recovery and outage handling now run through the config account.
+- Linux (`golang:1.27` container): `go test -race ./...` passed in all 14 packages.
+- Windows: CGO-free `go test ./...`, `go vet ./...`, `gofmt -l`, frontend check
+  (0 errors, 0 warnings), 46 frontend tests and build, and `check-docs.mjs` passed.
+- A deadlock found during development: resolving an account through `s.db` inside
+  the binding transaction waits forever on SQLite's single connection. The account
+  lookup now uses the caller's transaction, and the Immich package tests (which
+  hung before the fix) pass.
+
+### Security tests (plan, Testing section)
+
+| Plan requirement | Test |
+| --- | --- |
+| Migration: one config account per target with bindings, none without; every `account_id` backfilled; triggers reject a missing account, an account on the wrong target, and an account change once `album_state <> 'new'` | `TestDestinationAccountsUpgrade` |
+| Reconcile rules (configured key, link-only, missing key, ignored key) | `TestReconcileConfigAccounts` |
+| `immich_no_account`; operations use the event owner's account even when an admin acts; no default-target fallback | `TestImmichUsesTheEventOwnersAccount`, `TestEventProvisioningAPI` |
+| Provider validation: `401`/permissions → status, transport/`5xx` → error | `TestProviderValidatesConfigAccounts` |
+| Existing worker, retry, auto-import and recovery behaviour through config accounts | the existing `internal/integrations/immich` suite, unchanged apart from fixtures |
+
+Gate: `smoke-release.mjs` (existing bindings and auto-import survive the upgrade)
+and `smoke-immich.mjs` pass unchanged.

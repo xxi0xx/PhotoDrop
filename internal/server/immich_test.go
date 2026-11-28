@@ -82,8 +82,9 @@ func TestImmichAdminBoundaryAndHealth(t *testing.T) {
 	if w.Code != 200 || strings.Contains(w.Body.String(), "127.0.0.1") || strings.Contains(w.Body.String(), "API_KEY") {
 		t.Fatal("status exposed internals", w.Body.String())
 	}
-	if w := call("POST", path+"/test", "{}", cookie, session.CSRFToken, "http://photos.test"); w.Code != 503 {
-		t.Fatal("missing credentials silently passed")
+	// A URL without a key is a link-only server: the owner has no account there.
+	if w := call("POST", path+"/test", "{}", cookie, session.CSRFToken, "http://photos.test"); w.Code != 422 || !strings.Contains(w.Body.String(), "immich_no_account") {
+		t.Fatal("missing account silently passed", w.Code, w.Body.String())
 	}
 	if w := call("GET", "/healthz", "", nil, "", ""); w.Code != 200 {
 		t.Fatal("integration changed health")

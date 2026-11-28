@@ -65,7 +65,7 @@
   <p class="hint">Send independent copies to Immich. Deleting this event leaves the Immich album and files untouched. Cancel an active import before deleting the event.</p>
   {#if error || pollError}<p class="error" role="alert">{error || pollError}</p>{/if}
   {#if !status}<p role="status">Loading integration…</p>
-  {:else if status.targets.length === 0}<p class="hint">Optional: configure a named Immich target in your deployment to enable imports.</p>
+  {:else if status.targets.length === 0}<p class="hint">This event's host has no Immich account on any configured server yet. Immich import is optional; guest uploads work without it.</p>
   {:else}
     <div class="field"><label for="immich-target">Target</label><select id="immich-target" bind:value={target} disabled={busy || view?.active} onchange={changeTarget}>
       {#if !target}<option value="">Choose a target</option>{/if}

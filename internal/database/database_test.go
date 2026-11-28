@@ -35,7 +35,7 @@ func openGate1DB(t *testing.T, dir string) *sql.DB {
 }
 
 // latestMigration is the number of embedded migrations; update it with each new one.
-const latestMigration = 13
+const latestMigration = 14
 
 func migrationCount(t *testing.T, db *sql.DB) int {
 	t.Helper()
@@ -62,8 +62,8 @@ func TestInitializationAndRestart(t *testing.T) {
 		t.Fatalf("persistent database not created: %v", err)
 	}
 	var tables int
-	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil || tables != 14 {
-		t.Fatalf("expected fourteen migration/domain tables, got %d: %v", tables, err)
+	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil || tables != 16 {
+		t.Fatalf("expected sixteen migration/domain tables, got %d: %v", tables, err)
 	}
 	var before string
 	if err := db.QueryRow("SELECT applied_at FROM schema_migrations WHERE version = 1").Scan(&before); err != nil {

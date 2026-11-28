@@ -341,7 +341,8 @@ func TestAutoBoundedAndIndependentTargets(t *testing.T) {
 		if _, err := s.db.Exec("INSERT INTO immich_targets(id,key,base_url,created_at) VALUES(?,?,?,?)", i, fmt.Sprint("t-", i), "http://example.test", now()); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.db.Exec("INSERT INTO immich_event_imports(event_id,target_id,album_name,album_marker,album_state,immich_album_id,auto_import,created_at,updated_at) VALUES(?,?,'Album',?,'ready',?,1,?,?)", e.ID, i, fmt.Sprint("marker-", i), albumUUID, now(), now()); err != nil {
+		configAccount(t, s.db, int64(i))
+		if _, err := s.db.Exec("INSERT INTO immich_event_imports(event_id,target_id,account_id,album_name,album_marker,album_state,immich_album_id,auto_import,created_at,updated_at) VALUES(?,?,?,'Album',?,'ready',?,1,?,?)", e.ID, i, i, fmt.Sprint("marker-", i), albumUUID, now(), now()); err != nil {
 			t.Fatal(err)
 		}
 	}

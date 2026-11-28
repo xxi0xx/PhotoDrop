@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"photodrop/internal/destinations"
 	"photodrop/internal/events"
 	"photodrop/internal/media"
 )
@@ -40,6 +41,7 @@ type Job struct {
 	Error                       string `json:"error"`
 	CancelRequested             bool   `json:"cancel_requested"`
 	importID, eventID, targetID int64
+	accountID                   int64
 }
 type Status struct {
 	ActiveTarget string   `json:"active_target"`
@@ -59,13 +61,38 @@ type Status struct {
 	Job          *Job     `json:"job,omitempty"`
 }
 
+type rowQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+// eventAccount is the account an event's work on a target uses: the existing
+// binding's account (immutable once an album exists), otherwise the event
+// owner's live account there (invariant 3), otherwise ErrNoAccount.
+func eventAccount(ctx context.Context, q rowQuerier, eventID, targetID int64) (destinations.Account, error) {
+	var accountID int64
+	err := q.QueryRowContext(ctx, "SELECT account_id FROM immich_event_imports WHERE event_id=? AND target_id=?", eventID, targetID).Scan(&accountID)
+	if err == nil {
+		return destinations.Get(ctx, q, accountID)
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return destinations.Account{}, err
+	}
+	return destinations.ForEventOwner(ctx, q, eventID, targetID)
+}
+
 func (s *Service) Status(ctx context.Context, eventID int64, key string) (Status, error) {
 	var name string
-	if err := s.db.QueryRowContext(ctx, "SELECT name FROM events WHERE id=?", eventID).Scan(&name); err != nil {
+	var owner int64
+	if err := s.db.QueryRowContext(ctx, "SELECT name,owner_host_id FROM events WHERE id=?", eventID).Scan(&name, &owner); err != nil {
 		return Status{}, err
 	}
-	result := Status{ActiveTarget: s.targets.ActiveKey, Targets: []Target{}, AlbumName: name}
-	result.Targets = s.TargetCatalog().Targets
+	catalog, err := s.TargetCatalog(ctx, owner)
+	if err != nil {
+		return Status{}, err
+	}
+	result := Status{ActiveTarget: catalog.ActiveTarget, Targets: catalog.Targets, AlbumName: name}
+	explicit := key != ""
 	if key == "" {
 		// Show the event's existing binding on redirect, even when it differs from
 		// the deployment default. An explicit selection still wins.
@@ -74,13 +101,24 @@ func (s *Service) Status(ctx context.Context, eventID int64, key string) (Status
 			return result, err
 		}
 	}
-	t, err := s.targets.ByKey(key)
-	if err != nil {
-		if key != "" {
-			return result, err
-		}
+	if key == "" {
+		key = result.ActiveTarget // Only a default the owner can use.
+	}
+	if key == "" {
 		return result, nil
 	}
+	t, err := s.targets.ByKey(key)
+	if err != nil {
+		return result, err
+	}
+	account, err := eventAccount(ctx, s.db, eventID, t.ID)
+	if errors.Is(err, destinations.ErrNoAccount) && !explicit {
+		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	t = t.withAccount(account)
 	result.Target = &t
 	var importID int64
 	err = s.db.QueryRowContext(ctx, "SELECT id,album_name,COALESCE(immich_album_id,''),album_state,auto_import FROM immich_event_imports WHERE event_id=? AND target_id=?", eventID, t.ID).Scan(&importID, &result.AlbumName, &result.AlbumID, &result.AlbumState, &result.AutoImport)
@@ -105,12 +143,17 @@ func (s *Service) Status(ctx context.Context, eventID int64, key string) (Status
 	return result, nil
 }
 
-func (s *Service) Test(ctx context.Context, key string) (Version, error) {
+// Test validates the account an event would use on a target.
+func (s *Service) Test(ctx context.Context, eventID int64, key string) (Version, error) {
 	t, err := s.targets.ByKey(key)
 	if err != nil {
 		return Version{}, err
 	}
-	c, err := s.targets.client(t.ID)
+	account, err := eventAccount(ctx, s.db, eventID, t.ID)
+	if err != nil {
+		return Version{}, err
+	}
+	c, err := s.accountClient(ctx, s.db, account.ID)
 	if err != nil {
 		return Version{}, err
 	}
@@ -191,8 +234,14 @@ func (s *Service) enqueueTx(ctx context.Context, tx *sql.Tx, eventID int64, key,
 	if err != nil {
 		return 0, err
 	}
+	// An empty key means the deployment default. If the owner has no account
+	// there, this fails with ErrNoAccount; it never falls back to another target.
+	account, err := eventAccount(ctx, tx, eventID, t.ID)
+	if err != nil {
+		return 0, err
+	}
 	if requireCredentials {
-		if _, err := s.targets.client(t.ID); err != nil {
+		if _, err := s.accountClient(ctx, tx, account.ID); err != nil {
 			return 0, err
 		}
 	}
@@ -219,7 +268,7 @@ func (s *Service) enqueueTx(ctx context.Context, tx *sql.Tx, eventID int64, key,
 	if errors.Is(err, sql.ErrNoRows) {
 		var token [16]byte
 		rand.Read(token[:])
-		result, err := tx.ExecContext(ctx, "INSERT INTO immich_event_imports(event_id,target_id,album_name,album_marker,created_at,updated_at) VALUES(?,?,?,?,?,?)", eventID, t.ID, name, "PhotoDrop import "+hex.EncodeToString(token[:]), now(), now())
+		result, err := tx.ExecContext(ctx, "INSERT INTO immich_event_imports(event_id,target_id,account_id,album_name,album_marker,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", eventID, t.ID, account.ID, name, "PhotoDrop import "+hex.EncodeToString(token[:]), now(), now())
 		if err != nil {
 			return 0, err
 		}
@@ -356,7 +405,7 @@ func (s *Service) claim(ctx context.Context) (Job, error) {
 	}
 	defer tx.Rollback()
 	var j Job
-	err = tx.QueryRowContext(ctx, `SELECT j.id,j.event_import_id,i.event_id,i.target_id FROM integration_jobs j JOIN immich_event_imports i ON i.id=j.event_import_id WHERE j.status='queued' ORDER BY j.id LIMIT 1`).Scan(&j.ID, &j.importID, &j.eventID, &j.targetID)
+	err = tx.QueryRowContext(ctx, `SELECT j.id,j.event_import_id,i.event_id,i.target_id,i.account_id FROM integration_jobs j JOIN immich_event_imports i ON i.id=j.event_import_id WHERE j.status='queued' ORDER BY j.id LIMIT 1`).Scan(&j.ID, &j.importID, &j.eventID, &j.targetID, &j.accountID)
 	if err != nil {
 		return j, err
 	}
@@ -467,7 +516,9 @@ func (s *Service) album(ctx context.Context, c API, importID int64) (string, err
 }
 
 func (s *Service) importJob(ctx context.Context, j Job) error {
-	client, err := s.targets.client(j.targetID)
+	// Every Immich call for an event uses the binding's account: its album lives in
+	// that Immich user's library.
+	client, err := s.accountClient(ctx, s.db, j.accountID)
 	if err != nil {
 		return err
 	}

@@ -33,6 +33,9 @@ be probed. Event reads and updates are also scoped in SQL. Host administration a
 ownership transfer are admin-only (`403` for hosts). Disabling a host deletes its
 sessions in the same transaction. The host list never exposes OIDC issuers or
 subjects. Email and display name come from ID-token claims and are labels only.
+Immich operations on an event always use the event owner's destination account,
+even when an administrator acts; a target where the owner has no account is refused
+with `422 immich_no_account`, never served by another account.
 
 ## Stored credentials
 
