@@ -35,13 +35,6 @@ func Rotate(ctx context.Context, db *sql.DB, ring *secrets.Keyring) (RotateCount
 	if !ring.Configured() {
 		return counts, secrets.ErrNoKey
 	}
-	var exists bool
-	if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'destination_accounts')").Scan(&exists); err != nil {
-		return counts, fmt.Errorf("inspect destination accounts: %w", err)
-	}
-	if !exists {
-		return counts, nil
-	}
 	rows, err := db.QueryContext(ctx, `SELECT a.id, a.provider, t.key, a.remote_user_id, a.remote_credential_id,
 	    a.credential_key_id, a.credential_nonce, a.credential_ciphertext
 	    FROM destination_accounts a LEFT JOIN immich_targets t ON t.id = a.immich_target_id

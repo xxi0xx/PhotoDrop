@@ -4,29 +4,13 @@ import (
 	"bytes"
 	"database/sql"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
 	"photodrop/internal/database"
 	"photodrop/internal/secrets"
 )
-
-// accountsSchema mirrors the destination_accounts columns rotation reads, as
-// specified for migration 014. The table is created here until that migration
-// exists.
-const accountsSchema = `CREATE TABLE destination_accounts (
-    id INTEGER PRIMARY KEY,
-    provider TEXT NOT NULL,
-    host_id INTEGER NOT NULL,
-    immich_target_id INTEGER REFERENCES immich_targets(id),
-    credential_source TEXT NOT NULL,
-    remote_user_id TEXT,
-    remote_email TEXT,
-    remote_credential_id TEXT,
-    credential_key_id TEXT,
-    credential_nonce BLOB,
-    credential_ciphertext BLOB
-)`
 
 func key(fill byte) []byte { return bytes.Repeat([]byte{fill}, 32) }
 
@@ -37,8 +21,8 @@ func seeded(t *testing.T, ring *secrets.Keyring, n int) *sql.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if _, err := db.Exec(accountsSchema + `; INSERT INTO immich_targets(id,key,base_url,created_at) VALUES(1,'home','https://immich.test','old');
-	    INSERT INTO destination_accounts(id,provider,host_id,immich_target_id,credential_source) VALUES(100,'immich',1,1,'config')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO immich_targets(id,key,base_url,created_at) VALUES(1,'home','https://immich.test','old');
+	    INSERT INTO destination_accounts(id,provider,host_id,immich_target_id,credential_source,status,created_at,updated_at) VALUES(100,'immich',1,1,'config','active','now','now')`); err != nil {
 		t.Fatal(err)
 	}
 	for i := 1; i <= n; i++ {
@@ -48,7 +32,7 @@ func seeded(t *testing.T, ring *secrets.Keyring, n int) *sql.DB {
 }
 
 func bindingFor(id int64) secrets.Binding {
-	return secrets.Binding{AccountID: id, Provider: "immich", TargetKey: "home", RemoteUserID: "user", RemoteCredentialID: "credential"}
+	return secrets.Binding{AccountID: id, Provider: "immich", TargetKey: "home", RemoteUserID: "user-" + strconv.FormatInt(id, 10), RemoteCredentialID: "credential"}
 }
 
 func store(t *testing.T, db *sql.DB, ring *secrets.Keyring, id int64, plaintext string) {
@@ -58,8 +42,12 @@ func store(t *testing.T, db *sql.DB, ring *secrets.Keyring, id int64, plaintext 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO destination_accounts(id,provider,host_id,immich_target_id,credential_source,remote_user_id,remote_credential_id,credential_key_id,credential_nonce,credential_ciphertext)
-	    VALUES(?,'immich',1,1,'linked','user','credential',?,?,?)`, id, keyID, nonce, ciphertext); err != nil {
+	// One host per linked account: a host has at most one live account per target.
+	if _, err := db.Exec(`INSERT OR IGNORE INTO hosts(id,role,display_name,oidc_issuer,oidc_subject,created_at) VALUES(?,'host','Host','https://idp.test/',?,'now')`, 1000+id, "host-"+strconv.FormatInt(id, 10)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO destination_accounts(id,provider,host_id,immich_target_id,credential_source,remote_user_id,remote_credential_id,credential_key_id,credential_nonce,credential_ciphertext,status,created_at,updated_at)
+	    VALUES(?,'immich',?,1,'linked',?,'credential',?,?,?,'active','now','now')`, id, 1000+id, "user-"+strconv.FormatInt(id, 10), keyID, nonce, ciphertext); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -87,19 +75,13 @@ func readAll(t *testing.T, db *sql.DB, ring *secrets.Keyring) map[int64]string {
 	return out
 }
 
-func TestRotateWithoutAccountsTableOrRows(t *testing.T) {
+func TestRotateWithZeroRowsAndWithoutAKey(t *testing.T) {
 	ring, _ := secrets.FromKeys(key(1))
 	db, err := database.Open(t.Context(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if counts, err := Rotate(t.Context(), db, ring); err != nil || counts != (RotateCounts{}) {
-		t.Fatal("no destination_accounts table", counts, err)
-	}
-	if _, err := db.Exec(accountsSchema); err != nil {
-		t.Fatal(err)
-	}
 	if counts, err := Rotate(t.Context(), db, ring); err != nil || counts != (RotateCounts{}) {
 		t.Fatal("zero rows", counts, err)
 	}

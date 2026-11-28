@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"photodrop/internal/auth"
+	"photodrop/internal/destinations"
 	"photodrop/internal/integrations/immich"
 	"photodrop/internal/media"
 )
@@ -20,6 +21,8 @@ func (a *application) immichFailure(w http.ResponseWriter, err error) {
 		apiError(w, 422, "immich_input", immich.ErrInput.Error(), nil)
 	case errors.Is(err, immich.ErrActive):
 		apiError(w, 409, "immich_active", immich.ErrActive.Error(), nil)
+	case errors.Is(err, destinations.ErrNoAccount):
+		apiError(w, 422, "immich_no_account", destinations.ErrNoAccount.Error(), nil)
 	default:
 		apiError(w, 503, "immich_unavailable", immich.SafeError(err), nil)
 	}
@@ -33,8 +36,14 @@ func (a *application) immichStatus(w http.ResponseWriter, r *http.Request, _ aut
 	writeJSON(w, 200, status)
 }
 
-func (a *application) immichTargets(w http.ResponseWriter, r *http.Request, _ auth.Session) {
-	writeJSON(w, 200, a.immich.TargetCatalog())
+// immichTargets lists the caller's usable targets, for the new-event form.
+func (a *application) immichTargets(w http.ResponseWriter, r *http.Request, s auth.Session) {
+	catalog, err := a.immich.TargetCatalog(r.Context(), s.Host.ID)
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, catalog)
 }
 
 func (a *application) immichAutoImport(w http.ResponseWriter, r *http.Request, _ auth.Session) {
@@ -84,7 +93,7 @@ func (a *application) immichTest(w http.ResponseWriter, r *http.Request, s auth.
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	v, err := a.immich.Test(ctx, input.Target)
+	v, err := a.immich.Test(ctx, internalID(r), input.Target)
 	if err != nil {
 		a.immichFailure(w, err)
 		return

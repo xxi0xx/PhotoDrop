@@ -30,7 +30,8 @@ persistent sessions with CSRF/origin checks. Each event has one owner host;
 administrators see every event, hosts only their own. Guests use event-scoped grants, optional Turnstile and unverified contributor
 labels. Limits/quotas bound abuse; signature sniffing is not malware analysis.
 Export streams ready assets to ordinary files/manifest. Immich jobs persist/recover
-in SQLite; Immich remains independent with separate originals/backups. Credentials
+in SQLite and run with the event owner's destination account (`destination_accounts`,
+migration 014): a binding names its account, which is fixed once its album exists; Immich remains independent with separate originals/backups. Credentials
 stay in runtime configuration, never frontend bundles or backend identity records.
 The exception is hosts' linked Immich keys, stored encrypted under a master key
 file outside `/data` (`internal/secrets`; see [security](security.md#stored-credentials)).

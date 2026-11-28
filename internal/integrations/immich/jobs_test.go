@@ -163,6 +163,7 @@ func jobsFixture(t *testing.T, count int) (*Service, *fakeAPI, func(string), eve
 	if _, err := db.Exec("INSERT INTO immich_targets(id,key,base_url,created_at) VALUES(1,'test','http://immich.test',?)", now()); err != nil {
 		t.Fatal(err)
 	}
+	configAccount(t, db, 1)
 	targets := &Targets{ActiveKey: "test", entries: map[int64]Target{1: {ID: 1, Key: "test", Available: true, client: fake}}}
 	return New(db, source, targets, logger), fake, upload, e
 }
@@ -474,5 +475,14 @@ func TestThreeTransfersRunWhileFourthWaits(t *testing.T) {
 	}
 	if f.maxInflight != 3 {
 		t.Fatal("incorrect concurrency", f.maxInflight)
+	}
+}
+
+// configAccount gives host 1 the config account on a target, as Reconcile does
+// for a configured API key. Its id equals the target id.
+func configAccount(t *testing.T, db *sql.DB, targetID int64) {
+	t.Helper()
+	if _, err := db.Exec("INSERT INTO destination_accounts(id,provider,host_id,immich_target_id,credential_source,status,created_at,updated_at) VALUES(?,'immich',1,?,'config','active',?,?)", targetID, targetID, now(), now()); err != nil {
+		t.Fatal(err)
 	}
 }

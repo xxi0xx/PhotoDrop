@@ -106,7 +106,9 @@ See [backend configuration](storage-backends.md).
 | `PHOTODROP_IMMICH_<KEY>_API_KEY` | empty | Up to 4096 bytes, no NUL/newline; required for operations | Secret |
 
 Use uppercase/underscore key substitution. Historical targets can omit URL/key and
-remain unavailable without erasing identity. Rotate keys for the same server/account;
+remain unavailable without erasing identity. A configured key is the administrator's
+config account; a URL without a key is a link-only server. See
+[whose account an event uses](export-immich.md#whose-immich-account-an-event-uses). Rotate keys for the same server/account;
 another server needs a new target key. The optional PUBLIC_URL is runtime-only,
 may change without changing target identity, and is never used for API requests.
 Without it, the admin shows no browser album link.

@@ -173,6 +173,31 @@ Omitting historical credentials keeps their records visible and makes operations
 on that target safely unavailable. Immich outages, invalid keys, failed jobs,
 and missing credentials do not change `/healthz`.
 
+### Whose Immich account an event uses
+
+Each event belongs to one host, and every Immich operation on it uses **the event
+owner's account** on the chosen target, whoever clicks. A configured API key is a
+*config account* owned by the original administrator (host 1), so it serves the
+administrator's events only. At startup PhotoDrop applies these rules:
+
+- **URL and API key configured:** the administrator gets a config account on that
+  target (once). If the administrator already has a linked account there, the key
+  is ignored and the log says "Immich config key ignored: the admin has a linked
+  account on this target".
+- **URL without an API key:** a *link-only* server. Nobody has an account there
+  until a host links one.
+- **Key later removed:** the config account stays, unavailable, exactly like
+  missing credentials before. It still counts as the administrator's account on
+  that target. Restore the key to use it again.
+
+The target lists in the admin show only servers where the relevant host (you, for
+a new event; the owner, for an existing event) has an account. An event's binding
+keeps its account for good once its album exists, because the album lives in that
+Immich user's library. Choosing a target where the owner has no account, including
+the deployment default `PHOTODROP_IMMICH_TARGET`, is refused with
+`422 immich_no_account`; PhotoDrop never falls back to another server or to the
+administrator's key. Hosts link their own accounts in a later release.
+
 `PHOTODROP_IMMICH_<KEY>_PUBLIC_URL` is an optional browser origin. It follows the
 same HTTP(S) origin validation, but is not persisted and is not part of immutable
 server identity. Recreate PhotoDrop after changing it. API requests always use

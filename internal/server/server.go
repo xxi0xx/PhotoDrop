@@ -68,6 +68,9 @@ func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS,
 	if err != nil {
 		return nil, err
 	}
+	for _, key := range targets.Ignored {
+		logger.Warn("Immich config key ignored: the admin has a linked account on this target", "target", key)
+	}
 	imports := immich.New(db, uploads, targets, logger)
 	uploads.ConfigureSecurity(cfg.Security)
 	connectSrc := "'self'"

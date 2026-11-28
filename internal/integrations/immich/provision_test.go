@@ -158,6 +158,7 @@ func TestProvisionMultipleTargetsAndBrowserLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := &fakeAPI{}
+	configAccount(t, s.db, id)
 	s.targets.entries[id] = Target{ID: id, Key: "second", Available: true, PublicURL: "https://public.example", client: second}
 	if _, err := s.Provision(t.Context(), e.ID, "test", ""); err != nil {
 		t.Fatal(err)

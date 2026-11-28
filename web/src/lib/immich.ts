@@ -1,4 +1,5 @@
-export type ImmichTarget = { id: number; key: string; available: boolean; public_url?: string };
+export type ImmichAccount = { id: number; provider: string; source: 'config' | 'linked'; remote_email?: string; status: 'active' | 'needs_relink' | 'revoked'; last_validated_at?: string };
+export type ImmichTarget = { id: number; key: string; available: boolean; public_url?: string; account?: ImmichAccount };
 export type ImmichTargets = { active_target: string; targets: ImmichTarget[] };
 export function initialTarget(catalog: ImmichTargets): string {
   return catalog.targets.find(one => one.key === catalog.active_target)?.key ?? catalog.targets.find(one => one.available)?.key ?? catalog.targets[0]?.key ?? '';
