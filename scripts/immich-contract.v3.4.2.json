@@ -1,0 +1,488 @@
+{
+  "tag": "v3.4.2",
+  "operations": [
+    {
+      "method": "post",
+      "path": "/albums",
+      "permission": "album.create",
+      "parameters": [],
+      "request": {
+        "contentType": "application/json",
+        "properties": [
+          "albumName",
+          "albumUsers",
+          "assetIds",
+          "description"
+        ],
+        "required": [
+          "albumName"
+        ]
+      },
+      "responses": {
+        "201": {
+          "contentType": "application/json",
+          "properties": [
+            "albumName",
+            "albumThumbnailAssetId",
+            "albumUsers",
+            "assetCount",
+            "contributorCounts",
+            "createdAt",
+            "description",
+            "endDate",
+            "hasSharedLink",
+            "id",
+            "isActivityEnabled",
+            "lastModifiedAssetTimestamp",
+            "order",
+            "shared",
+            "startDate",
+            "updatedAt"
+          ],
+          "required": [
+            "albumName",
+            "albumThumbnailAssetId",
+            "albumUsers",
+            "assetCount",
+            "createdAt",
+            "description",
+            "hasSharedLink",
+            "id",
+            "isActivityEnabled",
+            "shared",
+            "updatedAt"
+          ]
+        }
+      }
+    },
+    {
+      "method": "get",
+      "path": "/albums",
+      "permission": "album.read",
+      "parameters": [
+        "query:assetId",
+        "query:id",
+        "query:isOwned",
+        "query:isShared",
+        "query:name"
+      ],
+      "request": null,
+      "responses": {
+        "200": {
+          "contentType": "application/json",
+          "properties": [
+            "albumName",
+            "albumThumbnailAssetId",
+            "albumUsers",
+            "assetCount",
+            "contributorCounts",
+            "createdAt",
+            "description",
+            "endDate",
+            "hasSharedLink",
+            "id",
+            "isActivityEnabled",
+            "lastModifiedAssetTimestamp",
+            "order",
+            "shared",
+            "startDate",
+            "updatedAt"
+          ],
+          "required": [
+            "albumName",
+            "albumThumbnailAssetId",
+            "albumUsers",
+            "assetCount",
+            "createdAt",
+            "description",
+            "hasSharedLink",
+            "id",
+            "isActivityEnabled",
+            "shared",
+            "updatedAt"
+          ],
+          "array": true
+        }
+      }
+    },
+    {
+      "method": "get",
+      "path": "/albums/{id}",
+      "permission": "album.read",
+      "parameters": [
+        "path:id!",
+        "query:key",
+        "query:slug"
+      ],
+      "request": null,
+      "responses": {
+        "200": {
+          "contentType": "application/json",
+          "properties": [
+            "albumName",
+            "albumThumbnailAssetId",
+            "albumUsers",
+            "assetCount",
+            "contributorCounts",
+            "createdAt",
+            "description",
+            "endDate",
+            "hasSharedLink",
+            "id",
+            "isActivityEnabled",
+            "lastModifiedAssetTimestamp",
+            "order",
+            "shared",
+            "startDate",
+            "updatedAt"
+          ],
+          "required": [
+            "albumName",
+            "albumThumbnailAssetId",
+            "albumUsers",
+            "assetCount",
+            "createdAt",
+            "description",
+            "hasSharedLink",
+            "id",
+            "isActivityEnabled",
+            "shared",
+            "updatedAt"
+          ]
+        }
+      }
+    },
+    {
+      "method": "put",
+      "path": "/albums/{id}/assets",
+      "permission": "albumAsset.create",
+      "parameters": [
+        "path:id!"
+      ],
+      "request": {
+        "contentType": "application/json",
+        "properties": [
+          "ids"
+        ],
+        "required": [
+          "ids"
+        ]
+      },
+      "responses": {
+        "200": {
+          "contentType": "application/json",
+          "properties": [
+            "error",
+            "errorMessage",
+            "id",
+            "success"
+          ],
+          "required": [
+            "id",
+            "success"
+          ],
+          "array": true
+        }
+      }
+    },
+    {
+      "method": "post",
+      "path": "/assets",
+      "permission": "asset.upload",
+      "parameters": [
+        "header:x-immich-checksum",
+        "query:key",
+        "query:slug"
+      ],
+      "request": {
+        "contentType": "multipart/form-data",
+        "properties": [
+          "assetData",
+          "duration",
+          "fileCreatedAt",
+          "fileModifiedAt",
+          "filename",
+          "isFavorite",
+          "livePhotoVideoId",
+          "metadata",
+          "sidecarData",
+          "visibility"
+        ],
+        "required": [
+          "assetData",
+          "fileCreatedAt",
+          "fileModifiedAt"
+        ]
+      },
+      "responses": {
+        "200": {
+          "contentType": "application/json",
+          "properties": [
+            "id",
+            "status"
+          ],
+          "required": [
+            "id",
+            "status"
+          ]
+        },
+        "201": {
+          "contentType": "application/json",
+          "properties": [
+            "id",
+            "status"
+          ],
+          "required": [
+            "id",
+            "status"
+          ]
+        }
+      }
+    },
+    {
+      "method": "get",
+      "path": "/api-keys/me",
+      "permission": null,
+      "parameters": [],
+      "request": null,
+      "responses": {
+        "200": {
+          "contentType": "application/json",
+          "properties": [
+            "createdAt",
+            "id",
+            "name",
+            "permissions",
+            "updatedAt"
+          ],
+          "required": [
+            "createdAt",
+            "id",
+            "name",
+            "permissions",
+            "updatedAt"
+          ]
+        }
+      }
+    },
+    {
+      "method": "get",
+      "path": "/server/version",
+      "permission": null,
+      "parameters": [],
+      "request": null,
+      "responses": {
+        "200": {
+          "contentType": "application/json",
+          "properties": [
+            "featureLevel",
+            "major",
+            "minor",
+            "patch",
+            "prerelease"
+          ],
+          "required": [
+            "featureLevel",
+            "major",
+            "minor",
+            "patch",
+            "prerelease"
+          ]
+        }
+      }
+    },
+    {
+      "method": "post",
+      "path": "/oauth/authorize",
+      "permission": null,
+      "parameters": [],
+      "request": {
+        "contentType": "application/json",
+        "properties": [
+          "codeChallenge",
+          "redirectUri",
+          "state"
+        ],
+        "required": [
+          "redirectUri"
+        ]
+      },
+      "responses": {
+        "201": {
+          "contentType": "application/json",
+          "properties": [
+            "url"
+          ],
+          "required": [
+            "url"
+          ]
+        }
+      }
+    },
+    {
+      "method": "post",
+      "path": "/oauth/callback",
+      "permission": null,
+      "parameters": [],
+      "request": {
+        "contentType": "application/json",
+        "properties": [
+          "codeVerifier",
+          "state",
+          "url"
+        ],
+        "required": [
+          "url"
+        ]
+      },
+      "responses": {
+        "201": {
+          "contentType": "application/json",
+          "properties": [
+            "accessToken",
+            "isAdmin",
+            "isOnboarded",
+            "name",
+            "profileImagePath",
+            "shouldChangePassword",
+            "userEmail",
+            "userId"
+          ],
+          "required": [
+            "accessToken",
+            "isAdmin",
+            "isOnboarded",
+            "name",
+            "profileImagePath",
+            "shouldChangePassword",
+            "userEmail",
+            "userId"
+          ]
+        }
+      }
+    },
+    {
+      "method": "get",
+      "path": "/users/me",
+      "permission": "user.read",
+      "parameters": [],
+      "request": null,
+      "responses": {
+        "200": {
+          "contentType": "application/json",
+          "properties": [
+            "avatarColor",
+            "clusterGroupId",
+            "createdAt",
+            "deletedAt",
+            "email",
+            "id",
+            "isAdmin",
+            "license",
+            "name",
+            "oauthId",
+            "profileChangedAt",
+            "profileImagePath",
+            "quotaSizeInBytes",
+            "quotaUsageInBytes",
+            "shouldChangePassword",
+            "status",
+            "storageLabel",
+            "updatedAt"
+          ],
+          "required": [
+            "avatarColor",
+            "clusterGroupId",
+            "createdAt",
+            "deletedAt",
+            "email",
+            "id",
+            "isAdmin",
+            "license",
+            "name",
+            "oauthId",
+            "profileChangedAt",
+            "profileImagePath",
+            "quotaSizeInBytes",
+            "quotaUsageInBytes",
+            "shouldChangePassword",
+            "status",
+            "storageLabel",
+            "updatedAt"
+          ]
+        }
+      }
+    },
+    {
+      "method": "post",
+      "path": "/api-keys",
+      "permission": "apiKey.create",
+      "parameters": [],
+      "request": {
+        "contentType": "application/json",
+        "properties": [
+          "name",
+          "permissions"
+        ],
+        "required": [
+          "permissions"
+        ]
+      },
+      "responses": {
+        "201": {
+          "contentType": "application/json",
+          "properties": [
+            "apiKey",
+            "createdAt",
+            "id",
+            "name",
+            "permissions",
+            "secret",
+            "updatedAt"
+          ],
+          "required": [
+            "apiKey",
+            "createdAt",
+            "id",
+            "name",
+            "permissions",
+            "secret",
+            "updatedAt"
+          ]
+        }
+      }
+    },
+    {
+      "method": "delete",
+      "path": "/api-keys/{id}",
+      "permission": "apiKey.delete",
+      "parameters": [
+        "path:id!"
+      ],
+      "request": null,
+      "responses": {
+        "204": null
+      }
+    },
+    {
+      "method": "post",
+      "path": "/auth/logout",
+      "permission": null,
+      "parameters": [],
+      "request": null,
+      "responses": {
+        "200": {
+          "contentType": "application/json",
+          "properties": [
+            "redirectUri",
+            "successful"
+          ],
+          "required": [
+            "redirectUri",
+            "successful"
+          ]
+        }
+      }
+    }
+  ]
+}

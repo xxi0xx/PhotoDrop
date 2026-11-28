@@ -66,7 +66,7 @@ Cloudflare-proxied body limits can affect local uploads; direct S3 avoids sendin
 media bodies through the PhotoDrop proxy. See [HTTPS and proxies](docs/reverse-proxy.md).
 
 Immich remains a separate application and data store. Use its HTTP API, never a
-shared internal library mount. **Immich v3.2.1** is the tested version; other 3.x
+shared internal library mount. **Immich v3.4.2** is the tested version; other 3.x
 versions are not independently verified. See [export and Immich](docs/export-immich.md).
 
 ## Documentation

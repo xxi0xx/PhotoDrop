@@ -116,7 +116,7 @@ preserved as data. This is a portable event/media export, not a SQLite backup.
 
 ## Configure Immich
 
-The adapter is validated against **Immich v3.2.1**. Its API contract is restricted
+The adapter is validated against **Immich v3.4.2**. Its API contract is restricted
 to major version 3; older/future major versions fail connection validation.
 Other 3.x releases are not independently verified. The target must be reachable
 from the PhotoDrop container, which may differ from your browser's address.
@@ -179,7 +179,7 @@ server identity. Recreate PhotoDrop after changing it. API requests always use
 `_URL`; the admin's **Open in Immich** link uses only `_PUBLIC_URL` and the saved
 album ID. An absent public URL means no link, even if the API URL is reachable
 in a browser. The `/albums/{albumId}` route is verified against the
-[Immich v3.2.1 web source](https://github.com/immich-app/immich/tree/v3.2.1/web/src/routes).
+[Immich v3.4.2 web source](https://github.com/immich-app/immich/tree/v3.4.2/web/src/routes).
 Opening it uses your existing Immich browser login; PhotoDrop supplies no token.
 
 ## Minimum API-key permissions
@@ -191,7 +191,7 @@ Create a key in your Immich account's API-key settings with exactly:
 - `asset.upload`
 - `albumAsset.create`
 
-This four-permission set passed the real v3.2.1 integration suite. PhotoDrop does
+This four-permission set passed the real v3.4.2 integration suite. PhotoDrop does
 not need delete, asset download, user administration, or full permissions.
 `GET /api/api-keys/me` authenticates the key and exposes its permission list
 without requiring `apiKey.read`; `GET /api/server/version` identifies the API
@@ -199,8 +199,8 @@ version. **Test Immich connection** checks these and verifies the required
 permission set without creating an album or media. Actual create/upload/assignment
 operations can still fail later because of quota, storage, or changed permissions.
 
-Contract sources: [pinned OpenAPI schema](https://github.com/immich-app/immich/blob/v3.2.1/open-api/immich-openapi-specs.json),
-[API-key controller](https://github.com/immich-app/immich/blob/v3.2.1/server/src/controllers/api-key.controller.ts),
+Contract sources: [pinned OpenAPI schema](https://github.com/immich-app/immich/blob/v3.4.2/open-api/immich-openapi-specs.json),
+[API-key controller](https://github.com/immich-app/immich/blob/v3.4.2/server/src/controllers/api-key.controller.ts),
 and [official API documentation](https://docs.immich.app/api/).
 
 ## Albums, jobs, and recovery
@@ -364,12 +364,25 @@ node scripts/smoke-immich.mjs
 docker compose -f scripts/compose-immich-test.yml down
 ```
 
-The separate Compose project pins Immich v3.2.1, its official Postgres image and
+The separate Compose project pins Immich v3.4.2, its official Postgres image and
 Valkey dependency. Machine learning is disabled. All ports bind to loopback.
 Disposable account credentials are fixtures, and runtime test API keys have the
 four required permissions. It also starts two signed S3 test endpoints and a
 test-only proxy that forces failures/response loss against the **real** Immich
 API. The proxy cannot be selected by the production executable.
+
+A contract guard pins the API surface PhotoDrop relies on, without Docker:
+
+```sh
+node scripts/immich-contract.mjs --check --tag v3.4.2
+```
+
+It downloads that tag's OpenAPI spec and compares 13 operations with
+`scripts/immich-contract.v3.4.2.json`: method, path, required permission, parameter
+names, and request and 2xx response property names and required lists. CI runs it
+before the real suite. To evaluate a new Immich tag, run `--check --tag vX --snapshot
+scripts/immich-contract.v3.4.2.json` to list differences, then `--write --tag vX`
+and review the new snapshot alongside the real suite on that tag.
 
 The smoke script validates automatic image/MP4/MOV imports, gated burst/coalescing,
 uploads during active work, disable/enable backlog, restart discovery, and failed

@@ -131,7 +131,7 @@ func (c *Client) Validate(ctx context.Context) (Version, error) {
 	// v3 removed device upload fields used in v2. Only claim the contract tested
 	// here; fail safely on future incompatible major versions.
 	if version.Major != 3 || version.Minor < 0 || version.Patch < 0 {
-		return Version{}, errors.New("Immich API compatibility requires version 3.x (validated with 3.2.1)")
+		return Version{}, errors.New("Immich API compatibility requires version 3.x (validated with 3.4.2)")
 	}
 	return version, nil
 }
