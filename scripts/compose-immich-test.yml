@@ -1,5 +1,6 @@
 # Test-only real Immich. Never included by the production compose.yml.
-# API/Compose contract pinned to immich-app/immich v3.2.1.
+# API/Compose contract pinned to immich-app/immich v3.4.2 (database and Valkey
+# images copied from that tag's docker/docker-compose.yml).
 name: photodrop-immich-test
 services:
   objects:
@@ -58,7 +59,7 @@ services:
       timeout: 5s
       start_period: 2s
   immich-server:
-    image: ghcr.io/immich-app/immich-server:v3.2.1
+    image: ghcr.io/immich-app/immich-server:v3.4.2
     environment:
       DB_HOSTNAME: database
       DB_USERNAME: postgres
@@ -82,7 +83,7 @@ services:
       timeout: 5s
       retries: 60
   redis:
-    image: docker.io/valkey/valkey:9@sha256:70739f85ad2ee01a726a965584a0f94895f01b0c60b3cc8b0aeef11eaa6888cf
+    image: docker.io/valkey/valkey:9@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd
     healthcheck:
       test: [CMD, redis-cli, ping]
       interval: 2s

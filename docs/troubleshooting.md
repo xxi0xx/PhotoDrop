@@ -33,7 +33,7 @@ expanded Compose configuration or environment dumps: they can contain secrets.
 | Browser S3 PUT fails | Exact CORS origin, PUT method, Content-Type and If-None-Match headers, HTTPS, expiry; inspect without sharing signed URL |
 | Historical backend unavailable | Restore matching named credentials/configuration; never repoint an existing backend key |
 | Turnstile failure | Both keys, allowed public hostname, BASE_URL, fixed action, outbound HTTPS; test-key dummy hostname is not a production bypass |
-| Immich connection/import error | Tested v3.2.1 API, reachable single target URL, same account, four permissions in the integration guide; retry only failed work |
+| Immich connection/import error | Tested v3.4.2 API, reachable single target URL, same account, four permissions in the integration guide; retry only failed work |
 | Export error | New output directory with writable parent and hard-link support, correct UID, old backend credentials, existing source objects |
 | Migration error | Stop and preserve state/logs; verify target image and original migration checksums, permissions/disk space; restore backup for rollback, never edit history |
 
