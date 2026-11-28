@@ -138,3 +138,75 @@ Windows 11, Docker Engine 29.9.2, Compose 5.6.1, Go 1.27.0, Node 22.23.2.
 
 Gate: the authorization route table test, migration test, `smoke-oidc.mjs` and
 `smoke-release.mjs` pass (met locally); CI pending the PR's checks.
+
+## Phase 2 — Secrets keyring
+
+Baseline: `main` after PR 39 (`f2929b7`). Branch: `multi-host/phase-2-secrets`. No
+migration; nothing user-visible changes.
+
+### Changes
+
+- New `internal/secrets`: key files (32 bytes, standard or URL-safe base64, padded
+  or not), key id = first 16 hex characters of SHA-256("photodrop-key-id" ‖ key),
+  data key = HKDF-SHA256(key, no salt, `photodrop/destination-credential/v1`),
+  AES-256-GCM with a fresh 12-byte nonce, and the plan's AAD layout. `Keyring`
+  redacts `String`/`GoString`; `ErrUnknownKey` is the typed "cannot be decrypted"
+  error.
+- Config: `PHOTODROP_SECRETS_KEY_FILE` and `PHOTODROP_SECRETS_PREVIOUS_KEY_FILES`
+  (paths only). Server startup loads the keyring: no key logs that linking is
+  unavailable; a malformed, missing or (on Linux) group/other-accessible key file
+  stops startup.
+- New `internal/destinations` with `Rotate`, and the `photodrop rotate-secrets`
+  command. It checks that every stored credential decrypts before changing any,
+  re-encrypts one row per statement under the active key, leaves rows that changed
+  during the run alone, and prints counts only. With no `destination_accounts`
+  table yet (migration 014 is phase 3) it reports zero rows.
+- Docs: configuration (new section and Compose secret example), security (stored
+  credentials), backup/restore (back the key up separately), architecture,
+  upgrading, `.env.example` and `compose.yml`.
+
+### Local evidence (2026-11-27, America/Chicago)
+
+- Known-answer vectors for the key id and a ciphertext were computed independently
+  with Node.js `crypto` (`hkdfSync`, `aes-256-gcm`) and pinned in
+  `TestKnownAnswer`.
+- Startup cases in the real image (`photodrop:phase2-check`, as uid 10001):
+
+  | Case | Result |
+  | --- | --- |
+  | No key | starts; logs "secrets key not configured; Immich account linking is unavailable" |
+  | Valid key, mode 0400 | starts; logs "secrets key loaded" |
+  | Key mode 0644 | exit 1: "…is accessible to group or other (mode -rw-r--r--); run chmod 400 on it" |
+  | Key mode 0440 | exit 1, same check |
+  | Malformed key | exit 1: "…must contain 32 random bytes in base64; generate one with: openssl rand -base64 32" |
+  | Previous key without active key | exit 1 at configuration |
+  | `rotate-secrets` with a key | "Linked credentials: 0. Re-encrypted: 0. …" |
+  | `rotate-secrets` without a key | error "secrets key not configured" |
+
+  Error messages name the file but never its contents, and the key never appears
+  under `/data`.
+- Linux (`golang:1.27` container): `TestOverPermissiveKeyFileRejected` and
+  `TestLoadKeyFiles` passed, and the full `go test -race ./...` passed in all 14
+  packages.
+- Windows: CGO-free `go test ./...`, `go vet ./...`, the build, `gofmt -l`,
+  frontend check and tests, release tests, `check-docs.mjs` and
+  `git diff --check` passed. `TestOverPermissiveKeyFileRejected` skips on Windows
+  by design and ran on Linux above.
+
+### Security tests (plan, Testing section)
+
+| Plan requirement | Test |
+| --- | --- |
+| Round trip; wrong AAD, tampered ciphertext or wrong nonce fails | `TestRoundTripAndTampering` |
+| A previous key decrypts; encryption uses the active key | `TestPreviousKeysDecryptOnly` |
+| Unknown key id gives a typed error | `TestRoundTripAndTampering` (`ErrUnknownKey`) |
+| Malformed key files rejected | `TestLoadKeyFiles`, `TestStartupSecretsKeyFile` |
+| Over-permissive key files rejected | `TestOverPermissiveKeyFileRejected` (Linux) |
+| `String()` redacts | `TestKeyringRedactsItself` |
+| Derivation and AAD are stable | `TestKnownAnswer`, `TestAADRejectsAmbiguousFields` |
+| Rotation: zero rows, re-encrypts, refuses without changes, concurrent change | `TestRotateWithoutAccountsTableOrRows`, `TestRotateReencryptsUnderTheActiveKey`, `TestRotateRefusesWithoutChangingAnything`, `TestRotateLeavesRowsChangedDuringTheRun`, `TestRotateSecretsCommand` |
+| Configuration | `TestSecretsKeyFileConfiguration` |
+
+Gate: the secrets unit tests pass, and startup with no key, a bad key and an
+over-permissive key file behaves as specified (met locally); CI pending the PR's
+checks.

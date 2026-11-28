@@ -36,8 +36,11 @@ func run(ctx context.Context, args []string, logger *slog.Logger) error {
 	if len(args) > 0 && args[0] == "export" {
 		return exportEvent(ctx, args[1:], logger)
 	}
+	if len(args) > 0 && args[0] == "rotate-secrets" {
+		return rotateSecrets(ctx, args[1:], os.Stdout)
+	}
 	if len(args) != 0 && !(len(args) == 1 && args[0] == "healthcheck") {
-		return fmt.Errorf("usage: photodrop [version | healthcheck | export --event ID --output DIRECTORY]")
+		return fmt.Errorf("usage: photodrop [version | healthcheck | export --event ID --output DIRECTORY | rotate-secrets]")
 	}
 	cfg, err := config.Load()
 	if err != nil {

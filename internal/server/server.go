@@ -20,6 +20,7 @@ import (
 	"photodrop/internal/events"
 	"photodrop/internal/integrations/immich"
 	"photodrop/internal/media"
+	"photodrop/internal/secrets"
 	"photodrop/internal/storage"
 )
 
@@ -52,6 +53,17 @@ func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS,
 		return nil, err
 	}
 	uploads.ConfigureBackends(backends)
+	// A malformed or over-permissive key file is a startup error. No key is fine:
+	// features that need one stay unavailable, and /healthz is unaffected.
+	keyring, err := secrets.Load(cfg.Secrets.KeyFile, cfg.Secrets.PreviousKeyFiles)
+	if err != nil {
+		return nil, err
+	}
+	if keyring.Configured() {
+		logger.Info("secrets key loaded", "previous_keys", len(cfg.Secrets.PreviousKeyFiles))
+	} else {
+		logger.Info("secrets key not configured; Immich account linking is unavailable")
+	}
 	targets, err := immich.Reconcile(ctx, db, cfg)
 	if err != nil {
 		return nil, err
@@ -90,6 +102,7 @@ func newServer(ctx context.Context, cfg config.Config, db *sql.DB, assets fs.FS,
 		}
 	}
 	app.immich = imports
+	app.keyring = keyring
 	app.passwordEnabled = cfg.PasswordEnabled()
 	if cfg.OIDCEnabled() {
 		app.oidc = auth.NewOIDC(db, cfg.OIDC, cfg.BaseURL)

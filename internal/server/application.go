@@ -21,6 +21,7 @@ import (
 	"photodrop/internal/events"
 	"photodrop/internal/integrations/immich"
 	"photodrop/internal/media"
+	"photodrop/internal/secrets"
 	"photodrop/internal/storage"
 )
 
@@ -43,6 +44,7 @@ type application struct {
 	passwordEnabled bool
 	oidc            *auth.OIDC
 	oidcSlots       chan struct{}
+	keyring         *secrets.Keyring // Used by destination accounts; nil-safe.
 }
 
 func (a *application) routes(mux *http.ServeMux) {

@@ -12,6 +12,8 @@ Back up the complete persistent state, not just exported media:
 Preserve the whole directory including journals/WAL/SHM files when present. Save
 Compose files, image digest/version and private configuration/credentials separately
 in encrypted/access-controlled storage. Backups include personal data and session state.
+If a secrets key is configured, back up its file separately too; see
+[Secrets key](#secrets-key).
 
 ## Consistent stopped backup
 
@@ -51,6 +53,19 @@ migration validity and exported media hashes. A test origin changes the URL orig
 intentionally; restore the original BASE_URL in production to preserve printed QR
 URLs. Run only one server per directory. Restored sessions may still be valid;
 rotate the administrator password if backup custody was compromised.
+
+## Secrets key
+
+When `PHOTODROP_SECRETS_KEY_FILE` is set, back up that key file **separately** from
+`/data`, in encrypted, access-controlled storage. `/data` holds linked Immich
+credentials only as ciphertext; the key is what makes them readable, so a copy of
+`/data` alone exposes no Immich key.
+
+Restoring `/data` without its key loses no photos, events or Immich bindings.
+Affected accounts report "credential cannot be decrypted; restore the secrets key
+or relink"; restore the key, or have those hosts link Immich again. PhotoDrop never
+changes stored rows because a key is missing. Restore the key file with owner
+10001 and mode 400.
 
 ## External storage and Immich
 

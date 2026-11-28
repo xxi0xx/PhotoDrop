@@ -32,6 +32,9 @@ Migration 013 adds hosts and event ownership. It needs no configuration change:
 - **Add hosts when ready.** Set `PHOTODROP_OIDC_HOST_GROUPS` (or `_HOST_SUBJECTS`)
   and recreate PhotoDrop. Hosts see only their own events. Without host lists,
   PhotoDrop behaves as before.
+- **Optional secrets key.** Linking hosts' own Immich accounts needs
+  `PHOTODROP_SECRETS_KEY_FILE` (see [configuration](configuration.md#secrets-key-for-linked-accounts)).
+  Back the key file up separately from `/data`. Without it, PhotoDrop runs as before.
 
 Rollback after the upgrade needs the stopped pre-upgrade backup: an older binary
 refuses a database with migration 013 applied.
