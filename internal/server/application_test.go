@@ -196,7 +196,7 @@ func TestAdminAndGuestWorkflow(t *testing.T) {
 	w = call("POST", "/api/admin/login", string(loginBody), nil, "", origin)
 	check(w, 200)
 	cookie = w.Result().Cookies()[0]
-	if _, err := db.Exec("UPDATE admin_sessions SET expires_at = ?", time.Now().Unix()); err != nil {
+	if _, err := db.Exec("UPDATE host_sessions SET expires_at = ?", time.Now().Unix()); err != nil {
 		t.Fatal(err)
 	}
 	check(call("GET", "/api/admin/events", "", cookie, "", ""), 401)

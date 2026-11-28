@@ -56,7 +56,7 @@ func TestPhase4MediaQuotaUpgrade(t *testing.T) {
 		if err = db.QueryRow("SELECT group_concat(checksum||applied_at) FROM (SELECT checksum,applied_at FROM schema_migrations WHERE version<=11 ORDER BY version)").Scan(&after); err != nil {
 			t.Fatal(err)
 		}
-		if err = db.QueryRow(`SELECT max_assets,max_bytes,(max_photos IS NULL AND max_videos IS NULL AND max_photo_file_bytes IS NULL AND max_video_file_bytes IS NULL AND max_photo_storage_bytes IS NULL AND max_video_storage_bytes IS NULL) FROM events`).Scan(&count, &bytes, &unlimited); err != nil || count != 20 || bytes != 123456789 || unlimited != 1 || after != history || migrationCount(t, db) != 12 {
+		if err = db.QueryRow(`SELECT max_assets,max_bytes,(max_photos IS NULL AND max_videos IS NULL AND max_photo_file_bytes IS NULL AND max_video_file_bytes IS NULL AND max_photo_storage_bytes IS NULL AND max_video_storage_bytes IS NULL) FROM events`).Scan(&count, &bytes, &unlimited); err != nil || count != 20 || bytes != 123456789 || unlimited != 1 || after != history || migrationCount(t, db) != latestMigration {
 			t.Fatal("changed old quotas/history", err)
 		}
 		for i, kind := range kinds {

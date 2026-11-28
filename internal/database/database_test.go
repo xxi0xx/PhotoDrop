@@ -34,6 +34,9 @@ func openGate1DB(t *testing.T, dir string) *sql.DB {
 	return db
 }
 
+// latestMigration is the number of embedded migrations; update it with each new one.
+const latestMigration = 13
+
 func migrationCount(t *testing.T, db *sql.DB) int {
 	t.Helper()
 	var count int
@@ -59,8 +62,8 @@ func TestInitializationAndRestart(t *testing.T) {
 		t.Fatalf("persistent database not created: %v", err)
 	}
 	var tables int
-	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil || tables != 13 {
-		t.Fatalf("expected thirteen migration/domain tables, got %d: %v", tables, err)
+	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type = 'table'").Scan(&tables); err != nil || tables != 14 {
+		t.Fatalf("expected fourteen migration/domain tables, got %d: %v", tables, err)
 	}
 	var before string
 	if err := db.QueryRow("SELECT applied_at FROM schema_migrations WHERE version = 1").Scan(&before); err != nil {
@@ -74,7 +77,7 @@ func TestInitializationAndRestart(t *testing.T) {
 	if err := db.QueryRow("SELECT applied_at FROM schema_migrations WHERE version = 1").Scan(&after); err != nil {
 		t.Fatal(err)
 	}
-	if count := migrationCount(t, db); count != 12 || before != after {
+	if count := migrationCount(t, db); count != latestMigration || before != after {
 		t.Fatalf("migration reapplied: count=%d before=%s after=%s", count, before, after)
 	}
 }
@@ -159,7 +162,7 @@ func TestConcurrentInitialization(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if count := migrationCount(t, openTestDB(t, dir)); count != 12 {
+	if count := migrationCount(t, openTestDB(t, dir)); count != latestMigration {
 		t.Fatalf("concurrent initialization applied %d migrations", count)
 	}
 }
@@ -177,10 +180,10 @@ func TestGate1Upgrade(t *testing.T) {
 	if err := db.QueryRow("SELECT checksum, applied_at FROM schema_migrations WHERE version = 1").Scan(&afterChecksum, &afterApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount(t, db) != 12 || checksum != afterChecksum || applied != afterApplied {
+	if migrationCount(t, db) != latestMigration || checksum != afterChecksum || applied != afterApplied {
 		t.Fatal("Gate 1 history was changed during upgrade")
 	}
-	for _, table := range []string{"events", "admin_credential", "admin_sessions", "upload_sessions", "assets"} {
+	for _, table := range []string{"events", "admin_credential", "hosts", "host_sessions", "upload_sessions", "assets"} {
 		var exists bool
 		if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name = ? AND type = 'table')", table).Scan(&exists); err != nil || !exists {
 			t.Fatalf("missing %s: %v", table, err)
@@ -220,15 +223,20 @@ func TestGate2UpgradePreservesEventsAndSessions(t *testing.T) {
 	if err := db.QueryRow("SELECT name, deleting FROM events WHERE id = 1").Scan(&name, &deleting); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRow("SELECT COUNT(*) FROM admin_sessions").Scan(&sessions); err != nil {
+	// Migration 013 resets sessions: they must name a host, so everyone signs in again.
+	if err := db.QueryRow("SELECT COUNT(*) FROM host_sessions").Scan(&sessions); err != nil {
 		t.Fatal(err)
 	}
-	if after != before || name != "Existing event" || deleting || sessions != 1 || migrationCount(t, db) != 12 {
+	var owner int64
+	if err := db.QueryRow("SELECT owner_host_id FROM events WHERE id = 1").Scan(&owner); err != nil {
+		t.Fatal(err)
+	}
+	if after != before || name != "Existing event" || deleting || sessions != 0 || owner != 1 || migrationCount(t, db) != latestMigration {
 		t.Fatal("Gate 2 data/history changed during upgrade")
 	}
 	db.Close()
 	db = openTestDB(t, dir)
-	if migrationCount(t, db) != 12 {
+	if migrationCount(t, db) != latestMigration {
 		t.Fatal("restart reapplied migration")
 	}
 }

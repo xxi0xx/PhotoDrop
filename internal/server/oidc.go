@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -93,20 +94,28 @@ func (a *application) oidcCallback(w http.ResponseWriter, r *http.Request) {
 			err = auth.ErrOIDC
 		}
 	}
+	var identity auth.Identity
 	if err == nil {
-		err = a.oidc.Complete(r.Context(), query.Get("state"), binding(r), query.Get("code"), query.Has("error"))
+		identity, err = a.oidc.Complete(r.Context(), query.Get("state"), binding(r), query.Get("code"), query.Has("error"))
+	}
+	var hostID int64
+	if err == nil {
+		hostID, err = a.auth.ResolveHost(r.Context(), identity)
+		if errors.Is(err, auth.ErrHostDisabled) {
+			a.logger.Info("disabled host sign-in denied")
+		}
 	}
 	if err != nil {
 		a.oidcFailure(w, r)
 		return
 	}
-	token, session, err := a.auth.CreateSession(r.Context(), cookieToken(r))
+	token, session, err := a.auth.CreateSession(r.Context(), cookieToken(r), hostID)
 	if err != nil {
 		a.oidcFailure(w, r)
 		return
 	}
 	a.bindingCookie(w, r, "", -1)
 	a.setCookie(w, r, token, session.ExpiresAt, int(auth.SessionLifetime.Seconds()))
-	a.logger.Info("admin OIDC login succeeded")
+	a.logger.Info("OIDC login succeeded", "host_id", session.Host.ID, "role", session.Host.Role)
 	http.Redirect(w, r, "/admin", http.StatusSeeOther)
 }

@@ -1,10 +1,10 @@
-# Native OIDC administrator sign-in
+# Native OIDC sign-in for administrators and hosts
 
 PhotoDrop is the OpenID Connect relying party. The browser visits the provider
 once during sign-in, returns to PhotoDrop, and receives PhotoDrop's normal local
-administrator session. The provider is not in front of public pages or uploads.
-This adds another way to enter the same administrator role, not multiple accounts,
-profiles, roles or guest authentication.
+session. The provider is not in front of public pages or uploads. Each identity
+becomes a **host**: an administrator, who sees and manages every event and host,
+or a host, who sees and manages only its own events. Guests never sign in.
 
 ## Modes and configuration
 
@@ -42,14 +42,45 @@ HTTPS or loopback HTTP; redirects and insecure downgrades are rejected. Configur
 the canonical issuer rather than a URL that redirects. Host/X-Forwarded-* never
 determines the callback. No endpoint can be supplied through a login request.
 
-At least one explicit allowlist is required. `PHOTODROP_OIDC_ALLOWED_SUBJECTS`
-accepts comma-separated stable provider `sub` identifiers; group authorization
-accepts exact case-sensitive names from the configured top-level ID-token claim.
-If both are configured, authorization is **allowed subject OR any allowed group**.
-A malformed group claim fails the entire login when groups are configured, even
-if the subject matches. Missing groups can only pass through an allowed subject.
-No authorization is derived from email, display name or username. Every permitted
-identity has the same full administrator access; no identity profile is persisted.
+At least one of four explicit role lists is required. The subject lists accept
+comma-separated stable provider `sub` identifiers; the group lists accept exact
+case-sensitive names from the configured top-level ID-token claim.
+
+| Variable | Grants |
+| --- | --- |
+| `PHOTODROP_OIDC_ALLOWED_SUBJECTS`, `PHOTODROP_OIDC_ALLOWED_GROUPS` | **admin** |
+| `PHOTODROP_OIDC_HOST_SUBJECTS`, `PHOTODROP_OIDC_HOST_GROUPS` | **host** |
+
+Within a role, a listed subject **OR** any listed group matches. Admin wins when an
+identity matches both roles. An identity that matches no list is refused. A
+malformed group claim fails the entire login when any group list is configured,
+even if the subject matches. Missing groups can only pass through a listed subject.
+No authorization is derived from email, display name or username: PhotoDrop stores
+them only to label the host. Keep `profile` and `email` in `PHOTODROP_OIDC_SCOPES`
+for those labels and for Immich account linking.
+
+To add hosts, create a group such as `photodrop-hosts`, add the hosts to it, and
+set `PHOTODROP_OIDC_HOST_GROUPS=photodrop-hosts`. Administrators stay in the
+existing admin group. A deployment that sets no host list behaves as before.
+
+## Hosts
+
+PhotoDrop keeps one row per identity (issuer plus `sub`) with its role, display
+name and email. The role is derived again at **every** sign-in, so a group change
+takes effect at the next sign-in. Host 1 is the original administrator:
+
+- Password sign-in, where enabled, always signs in host 1.
+- After upgrading to multi-host, the **first admin OIDC sign-in claims host 1**.
+  That administrator keeps every event created before the upgrade. Sign in as the
+  administrator before any other admin does.
+- Every other identity becomes a new host on its first sign-in.
+
+Each event belongs to one host: whoever created it. A host's requests for another
+host's event get `404`, as if it did not exist. Administrators open **Hosts** to
+see every host and to disable or enable one; hosts are never deleted. Disabling
+signs that host out at once and blocks further sign-ins; its events stay. Nobody
+can disable their own host. An administrator can move an event to another host
+from the event page, but only before an Immich album exists for it.
 
 ## Authentik setup
 
@@ -117,8 +148,9 @@ Both login methods replace any supplied prior session with a fresh random local
 token. Only SHA-256 bearer hashes are stored, with the existing synchronizer CSRF
 token and 12-hour expiry. Cookies are HttpOnly/SameSite=Lax and Secure under HTTPS.
 Admin mutations still require same-origin evidence and CSRF. Password verification
-retains bcrypt cost 12; real password rotation revokes **all** local sessions and
-prevents an old password manager from creating a new password session.
+retains bcrypt cost 12; real password rotation revokes host 1's local sessions and
+prevents an old password manager from creating a new password session. Other
+hosts' sessions are unaffected.
 
 Once logged in, provider outages do not affect admin sessions, public events,
 guest uploads, health or the optional password fallback. Startup never discovers
@@ -127,11 +159,11 @@ If discovery is cached, the browser may first show the unavailable provider page
 Logout revokes only the PhotoDrop session, not the provider SSO session. Clicking
 SSO again may immediately sign in through that still-active provider session.
 
-Authorization is evaluated at login only. Removing a group membership, changing
-allowlists or disabling a login method does not revoke already-issued local
-sessions; they last at most 12 hours. For immediate revocation, stop PhotoDrop and
-use a trusted SQLite tool to delete `admin_sessions`, or rotate the configured
-password in a password-enabled mode. Do not edit tokens or invent a user table.
+The role is evaluated at sign-in. Removing a group membership, changing role lists
+or disabling a login method stops the next sign-in, but does not revoke an
+already-issued local session; it lasts at most 12 hours. For immediate removal, an
+administrator **disables** the host on the Hosts page, which deletes its sessions.
+Rotating the configured password revokes host 1's sessions. Do not edit tokens.
 
 ## Troubleshooting and recovery
 

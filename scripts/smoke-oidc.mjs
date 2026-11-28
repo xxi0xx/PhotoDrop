@@ -20,8 +20,8 @@ async function request(path,{method='GET',body,expected=200,cookies=true}={}){
 }
 async function faults(body){const r=await fetch('http://localhost:18995/__test/faults',{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});assert.ok(r.ok);return r.json()}
 function stop(){if(running){docker(['stop','--time','15',app]);docker(['rm','-v',app]);running=false}}
-async function start(mode){
-  const settings={PHOTODROP_LISTEN_ADDR:':8085',PHOTODROP_BASE_URL:base,PHOTODROP_DATA_DIR:'/data',PHOTODROP_ADMIN_AUTH:mode,PHOTODROP_OIDC_ISSUER:issuer,PHOTODROP_OIDC_CLIENT_ID:'photodrop-test',PHOTODROP_OIDC_CLIENT_SECRET:'disposable-oidc-client-secret',PHOTODROP_OIDC_ALLOWED_GROUPS:'photodrop-admins',PHOTODROP_RATE_LIMIT_DISABLED:'true'};
+async function start(mode,extra={}){
+  const settings={...extra,PHOTODROP_LISTEN_ADDR:':8085',PHOTODROP_BASE_URL:base,PHOTODROP_DATA_DIR:'/data',PHOTODROP_ADMIN_AUTH:mode,PHOTODROP_OIDC_ISSUER:issuer,PHOTODROP_OIDC_CLIENT_ID:'photodrop-test',PHOTODROP_OIDC_CLIENT_SECRET:'disposable-oidc-client-secret',PHOTODROP_OIDC_ALLOWED_GROUPS:'photodrop-admins',PHOTODROP_RATE_LIMIT_DISABLED:'true'};
   if(mode!=='oidc')settings.PHOTODROP_ADMIN_PASSWORD=password;
   docker(['run','-d','--name',app,'--network',`container:${provider}`,'-v',`${data}:/data`,...Object.entries(settings).flatMap(([k,v])=>['-e',`${k}=${v}`]),image]);running=true;await wait(base+'/healthz');
 }
@@ -38,6 +38,13 @@ async function login(){
   assert.ok(jar.get('photodrop_session'));assert.ok(!jar.has('photodrop_oidc'));
   csrf=(await (await request('/api/admin/session')).json()).csrf_token;
   const replay=await request(path,{expected:303});assert.equal(replay.headers.get('location'),'/admin/login?error=oidc');
+}
+async function deniedLogin(){
+  const begin=await request('/api/admin/oidc/login',{expected:303});
+  const authorized=await fetch(new URL(begin.headers.get('location')),{redirect:'manual'});assert.equal(authorized.status,303);
+  const callback=new URL(authorized.headers.get('location'));
+  const denied=await request(callback.pathname+callback.search,{expected:303});assert.equal(denied.headers.get('location'),'/admin/login?error=oidc');
+  assert.ok(!jar.has('photodrop_session'));
 }
 try{
   docker(['build','-t',image,'.'],{stdio:'inherit'});docker(['build','--target','backend','-t',tools,'.'],{stdio:'inherit'});
@@ -59,7 +66,25 @@ try{
   await request('/api/admin/login',{method:'POST',body:{password}});csrf=(await (await request('/api/admin/session')).json()).csrf_token;
   await request('/api/admin/logout',{method:'POST',body:{},expected:204});await request('/api/admin/session',{expected:401});
   await faults({});await login();
-  console.log('Native OIDC discovery/code/PKCE/JWKS/session flow, browser binding/replay, restart, outage guest upload, password fallback and local logout passed.');
+  assert.deepEqual((await (await request('/api/admin/session')).json()).host,{id:1,role:'admin',display_name:'Host'},'first admin sign-in must claim host 1');
+  // Hosts: the role comes from groups at each sign-in, events are scoped to their
+  // owner, and someone removed from every group is refused at the next sign-in.
+  stop();await start('password+oidc',{PHOTODROP_OIDC_HOST_GROUPS:'photodrop-hosts'});
+  jar=new Map();csrf='';await faults({Subject:'smoke-host',Groups:['photodrop-hosts'],Name:'Smoke Host'});await login();
+  const host=(await (await request('/api/admin/session')).json()).host;
+  assert.equal(host.role,'host');assert.equal(host.display_name,'Smoke Host');assert.notEqual(host.id,1);
+  assert.deepEqual((await (await request('/api/admin/events')).json()).events,[]);
+  await request(`/api/admin/events/${event.id}`,{expected:404});await request('/api/admin/hosts',{expected:403});
+  const own=(await (await request('/api/admin/events',{method:'POST',body:{name:'Host event',enabled:true},expected:201})).json()).event;
+  assert.deepEqual(own.owner,{id:host.id,display_name:'Smoke Host'});
+  jar=new Map();csrf='';await faults({Subject:'smoke-host',Groups:['photodrop-admins','photodrop-hosts']});await login();
+  assert.equal((await (await request('/api/admin/session')).json()).host.role,'admin','admin group must win over host group');
+  jar=new Map();csrf='';await faults({Subject:'smoke-host',Groups:[]});await deniedLogin();
+  jar=new Map();csrf='';await faults({});await login();
+  const all=(await (await request('/api/admin/events')).json()).events;
+  assert.ok(all.some(e=>e.id===own.id&&e.owner.display_name==='Host')&&all.some(e=>e.id===event.id&&e.owner.id===1),'admin must see every host event');
+  const hosts=(await (await request('/api/admin/hosts')).json()).hosts;assert.equal(hosts.length,2);
+  console.log('Native OIDC discovery/code/PKCE/JWKS/session flow, browser binding/replay, restart, outage guest upload, password fallback, local logout, host 1 claim, host roles from groups, event scoping and removed-user denial passed.');
   if(process.argv.includes('--browser')){
     console.log('Disposable browser fixture: http://localhost:8085/admin/login (password+oidc).');
     // Explicit interactive validation keeps only this named disposable project.

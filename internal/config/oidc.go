@@ -10,7 +10,9 @@ import (
 
 type OIDC struct {
 	Issuer, ClientID, ClientSecret string
+	// Allowed* grant the admin role; Host* grant the host role. Admin wins.
 	AllowedSubjects, AllowedGroups []string
+	HostSubjects, HostGroups       []string
 	GroupsClaim                    string
 	Scopes                         []string
 }
@@ -64,7 +66,7 @@ func (c *Config) loadAuth(lookup func(string) (string, bool)) error {
 	if err != nil || !ValidOIDCURL(c.OIDC.Issuer) || u.RawQuery != "" || u.ForceQuery {
 		return fmt.Errorf("PHOTODROP_OIDC_ISSUER must be an exact HTTPS issuer URL without credentials, query or fragment (HTTP only on loopback)")
 	}
-	for key, dst := range map[string]*[]string{"PHOTODROP_OIDC_ALLOWED_SUBJECTS": &c.OIDC.AllowedSubjects, "PHOTODROP_OIDC_ALLOWED_GROUPS": &c.OIDC.AllowedGroups} {
+	for key, dst := range map[string]*[]string{"PHOTODROP_OIDC_ALLOWED_SUBJECTS": &c.OIDC.AllowedSubjects, "PHOTODROP_OIDC_ALLOWED_GROUPS": &c.OIDC.AllowedGroups, "PHOTODROP_OIDC_HOST_SUBJECTS": &c.OIDC.HostSubjects, "PHOTODROP_OIDC_HOST_GROUPS": &c.OIDC.HostGroups} {
 		raw, _ := lookup(key)
 		if raw == "" {
 			continue
@@ -83,8 +85,8 @@ func (c *Config) loadAuth(lookup func(string) (string, bool)) error {
 			return fmt.Errorf("%s allows at most 64 entries", key)
 		}
 	}
-	if len(c.OIDC.AllowedSubjects)+len(c.OIDC.AllowedGroups) == 0 {
-		return fmt.Errorf("OIDC requires PHOTODROP_OIDC_ALLOWED_SUBJECTS and/or PHOTODROP_OIDC_ALLOWED_GROUPS")
+	if len(c.OIDC.AllowedSubjects)+len(c.OIDC.AllowedGroups)+len(c.OIDC.HostSubjects)+len(c.OIDC.HostGroups) == 0 {
+		return fmt.Errorf("OIDC requires at least one of PHOTODROP_OIDC_ALLOWED_SUBJECTS, PHOTODROP_OIDC_ALLOWED_GROUPS, PHOTODROP_OIDC_HOST_SUBJECTS or PHOTODROP_OIDC_HOST_GROUPS")
 	}
 	c.OIDC.GroupsClaim = "groups"
 	if value, ok := lookup("PHOTODROP_OIDC_GROUPS_CLAIM"); ok {

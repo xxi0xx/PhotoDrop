@@ -2,7 +2,8 @@
 
 Collect event photos and videos from guests without asking them to create accounts. Share an
 event link or QR code; guests choose files, optionally leave their name, and
-upload from their phone. One administrator manages events, quotas, and exports.
+upload from their phone. Administrators and hosts manage events, quotas, and exports;
+each host sees only its own events.
 
 PhotoDrop runs as one Go container with an embedded Svelte interface and SQLite.
 It stores media locally or sends browser uploads directly to private S3-compatible

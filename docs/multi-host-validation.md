@@ -66,3 +66,75 @@ Immich server image `ghcr.io/immich-app/immich-server@sha256:fc880c1bf665b4aab1e
 
 Gate: `smoke-immich.mjs` passes against v3.4.2 with no Go behaviour changes (met
 locally); the spec guard passes in CI (pending the PR's checks).
+
+## Phase 1 — Hosts and event ownership
+
+Baseline: `main` after PR 38 (`eed1ff3`). Branch: `multi-host/phase-1-hosts`.
+
+### Changes
+
+- Migration `013_hosts.sql`: `hosts` (host 1 = the existing administrator,
+  `password_login = 1`), `host_sessions` replacing `admin_sessions` (sessions reset),
+  `events.owner_host_id` backfilled to host 1 with NOT NULL enforced by triggers.
+  It adds one index beyond the plan's SQL: `host_sessions_host(host_id)`.
+- Auth: sessions carry `host {id, role, display_name}`; `OIDC.Complete` returns an
+  `Identity` with the role from the four lists (admin wins); `ResolveHost` claims
+  host 1 on the first admin sign-in, refreshes known hosts and denies disabled ones.
+  Password sign-in always uses host 1; a password change revokes only host 1's
+  sessions. New `PHOTODROP_OIDC_HOST_SUBJECTS` / `_HOST_GROUPS`.
+- Events: owner set on create; `List` / `Get` / `Update` take a scope; admin-only
+  `TransferOwner` with the plan's rules.
+- Server: one route table for every `/api/admin/events/{id}*` route, each wrapped in
+  an ownership check that answers `404`; `GET /api/admin/hosts`,
+  `PUT /api/admin/hosts/{id}`, `PUT /api/admin/events/{id}/owner` (admin-only, `403`
+  for hosts); `GET /api/admin/session` includes `host`.
+- Web: signed-in name in the navigation, Hosts page for admins, owner label in the
+  admin event list, and an owner selector on the event page.
+- Docs: configuration, OIDC, security, architecture, upgrading, README,
+  `.env.example` and `compose.yml`.
+
+### Local evidence (2026-11-27, America/Chicago)
+
+Windows 11, Docker Engine 29.9.2, Compose 5.6.1, Go 1.27.0, Node 22.23.2.
+
+- `node scripts/smoke-oidc.mjs` passed. New checks: the first admin OIDC sign-in
+  claims host 1; a `photodrop-hosts` identity signs in as a host, sees no other
+  host's events, gets `404` for the admin's event and `403` for the host list, and
+  owns the event it creates; with both groups the admin role wins; after removal
+  from every group the next sign-in is refused; the admin sees every host's events.
+- `node scripts/smoke-release.mjs` passed (upgrade and destructive restore from the
+  merged migration-012 baseline). Updated expectations: the pre-upgrade session is
+  rejected (`401`) and a fresh password sign-in is host 1 as admin; existing events
+  report `owner {id: 1, display_name: "Administrator"}` and `owner_host_id = 1`;
+  every other table, hash, quota and Immich binding is unchanged.
+- `node scripts/smoke-immich.mjs` against Immich v3.4.2 passed unchanged ("Real Immich
+  Gate 6 integration suite passed."): existing bindings, jobs and auto-import work
+  with events owned by host 1.
+- Browser check on a local build with the disposable OIDC fixture: admin and host
+  sign-ins, "Signed in as" name, host sees only "Your events" and no Hosts link,
+  "Event not found" for the admin's event, admin sees "All events" with host
+  labels, Hosts page, and moving an event to another host. Two spacing glitches on
+  the Hosts page and a stale owner selector after a move were fixed.
+- CGO-free `go test ./...`, `go vet ./...`, the production build and `gofmt -l`
+  passed; frontend check (0 errors, 0 warnings), 46 tests and build passed;
+  `release.test.mjs` (10) and `release-recovery.test.mjs` (10) passed;
+  `check-docs.mjs` and `git diff --check` passed. `release-recovery.test.mjs` failed
+  its real-Git-fetch test once while Docker builds loaded the machine and passed on
+  rerun, as in phase 0. Race tests run in CI.
+
+### Security tests (plan, Testing section)
+
+| Plan requirement | Test |
+| --- | --- |
+| Migration: host 1, owners backfilled, sessions reset, triggers reject NULL owner | `TestMultiHostUpgradeAssignsEventsToHostOne` |
+| Host resolution: claim host 1 once, new host, role updated on login | `TestResolveHostClaimsHostOneOnceThenCreatesHosts` |
+| Disabled host denied; disabling deletes sessions; password change revokes only host 1 | `TestHostSessionsDisableAndPasswordRotation` |
+| Admin wins; no list match denied; profile claims | `TestOIDCRoleDerivationAdminWinsAndProfileClaims` |
+| Every event route: another host gets `404`, owner and admin get access | `TestEventRoutesAreScopedToTheOwnerHost` (mutation-checked: removing the wrapper fails it) |
+| Ownership transfer rules | `TestOwnershipTransferRules` |
+| Admin-only host routes, self-disable refused, removed user denied at next login | `TestHostAdministrationAndRemovedUsers` |
+| Store scoping | `TestScopeLimitsHostsToTheirOwnEvents` |
+| Four role lists in configuration | `TestOIDCConfiguration` |
+
+Gate: the authorization route table test, migration test, `smoke-oidc.mjs` and
+`smoke-release.mjs` pass (met locally); CI pending the PR's checks.

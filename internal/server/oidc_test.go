@@ -186,7 +186,7 @@ func TestOIDCHTTPFlowAndLocalSession(t *testing.T) {
 		}
 	}
 	var stored string
-	rows, err := f.db.Query("SELECT token_hash FROM admin_sessions")
+	rows, err := f.db.Query("SELECT token_hash FROM host_sessions")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestOIDCOutageAtStartupLeavesGuestUsable(t *testing.T) {
 				t.Fatal("unhealthy")
 			}
 			on := true
-			e, err := events.New(f.db).Create(t.Context(), events.Input{Name: "Public during outage", Enabled: &on})
+			e, err := events.New(f.db).Create(t.Context(), 1, events.Input{Name: "Public during outage", Enabled: &on})
 			if err != nil {
 				t.Fatal(err)
 			}

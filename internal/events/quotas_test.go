@@ -26,7 +26,7 @@ func TestTypedQuotaValidationAndExactPersistence(t *testing.T) {
 				if err := json.Unmarshal(fmt.Appendf(nil, `{"name":"Quotas","enabled":true,"%s":%d}`, field, value), &in); err != nil {
 					t.Fatal(err)
 				}
-				event, err := store.Create(t.Context(), in)
+				event, err := store.Create(t.Context(), 1, in)
 				if value < 1 || value > bound {
 					var v *ValidationError
 					if !errors.As(err, &v) || v.Fields[field] == "" {
@@ -37,7 +37,7 @@ func TestTypedQuotaValidationAndExactPersistence(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				saved, err := store.Get(t.Context(), event.ID)
+				saved, err := store.Get(t.Context(), System, event.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -47,7 +47,7 @@ func TestTypedQuotaValidationAndExactPersistence(t *testing.T) {
 				if string(fields[field]) != fmt.Sprint(value) {
 					t.Fatal("rounded bytes", string(raw))
 				}
-				cleared, err := store.Update(t.Context(), event.ID, input())
+				cleared, err := store.Update(t.Context(), System, event.ID, input())
 				if err != nil {
 					t.Fatal(err)
 				}

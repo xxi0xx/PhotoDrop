@@ -29,12 +29,12 @@ type Snapshot struct {
 }
 
 func (s *Service) Snapshot(ctx context.Context, eventID int64) (*Snapshot, error) {
-	if _, err := s.events.Get(ctx, eventID); err != nil {
+	if _, err := s.events.Get(ctx, events.System, eventID); err != nil {
 		return nil, err
 	}
 	lock := s.lock(eventID)
 	lock.RLock()
-	e, err := s.events.Get(ctx, eventID)
+	e, err := s.events.Get(ctx, events.System, eventID)
 	if err != nil || e.Deleting {
 		lock.RUnlock()
 		if err != nil {

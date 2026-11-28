@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"io"
 	"net/http"
@@ -115,10 +116,10 @@ func TestOIDCProtocolAndRotation(t *testing.T) {
 		if storedState != tokenHash(state) || binding != tokenHash(browser) || len(nonce) != 64 || !validToken(verifier) || expires-created != 300 || state == browser || browser == verifier {
 			t.Fatal("unsafe transaction storage")
 		}
-		if err := s.Complete(t.Context(), state, browser, code, false); err != nil {
+		if err := completeErr(s, t.Context(), state, browser, code, false); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.Complete(t.Context(), state, browser, code, false); err == nil {
+		if err := completeErr(s, t.Context(), state, browser, code, false); err == nil {
 			t.Fatal("replay accepted")
 		}
 		var count int
@@ -150,10 +151,10 @@ func TestOIDCRejectsInvalidTokensAndClaims(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			p.SetFaults(fault)
 			state, browser, code := oidcFlow(t, s)
-			if err := s.Complete(t.Context(), state, browser, code, false); err == nil {
+			if err := completeErr(s, t.Context(), state, browser, code, false); err == nil {
 				t.Fatal("invalid response accepted")
 			}
-			if err := s.Complete(t.Context(), state, browser, code, false); err == nil {
+			if err := completeErr(s, t.Context(), state, browser, code, false); err == nil {
 				t.Fatal("failed callback reused")
 			}
 		})
@@ -180,7 +181,7 @@ func TestOIDCAuthorizationORAndCustomClaim(t *testing.T) {
 		s.cfg.GroupsClaim = tc.claim
 		p.SetFaults(tc.fault)
 		state, browser, code := oidcFlow(t, s)
-		if err := s.Complete(t.Context(), state, browser, code, false); (err == nil) != tc.allowed {
+		if err := completeErr(s, t.Context(), state, browser, code, false); (err == nil) != tc.allowed {
 			t.Fatal("authorization result", err)
 		}
 	}
@@ -192,19 +193,19 @@ func TestOIDCBindingExpiryPKCEAndConcurrentReplay(t *testing.T) {
 			state, browser, code := oidcFlow(t, s)
 			switch fault {
 			case "binding":
-				if s.Complete(t.Context(), state, randomToken(), code, false) == nil {
+				if completeErr(s, t.Context(), state, randomToken(), code, false) == nil {
 					t.Fatal("cross-browser callback accepted")
 				}
 				_, n, _ := p.Counts()
 				if n != 0 {
 					t.Fatal("exchanged unbound code")
 				}
-				if err := s.Complete(t.Context(), state, browser, code, false); err != nil {
+				if err := completeErr(s, t.Context(), state, browser, code, false); err != nil {
 					t.Fatal(err)
 				}
 			case "expiry":
 				db.Exec("UPDATE oidc_transactions SET expires_at=?", time.Now().Unix())
-				if s.Complete(t.Context(), state, browser, code, false) == nil {
+				if completeErr(s, t.Context(), state, browser, code, false) == nil {
 					t.Fatal("expired state accepted")
 				}
 				_, n, _ := p.Counts()
@@ -213,11 +214,11 @@ func TestOIDCBindingExpiryPKCEAndConcurrentReplay(t *testing.T) {
 				}
 			case "pkce":
 				db.Exec("UPDATE oidc_transactions SET pkce_verifier=?", randomToken())
-				if s.Complete(t.Context(), state, browser, code, false) == nil {
+				if completeErr(s, t.Context(), state, browser, code, false) == nil {
 					t.Fatal("wrong PKCE accepted")
 				}
 			case "provider error":
-				if s.Complete(t.Context(), state, browser, code, true) == nil || s.Complete(t.Context(), state, browser, code, false) == nil {
+				if completeErr(s, t.Context(), state, browser, code, true) == nil || completeErr(s, t.Context(), state, browser, code, false) == nil {
 					t.Fatal("provider error failed to consume state")
 				}
 			case "concurrent":
@@ -227,7 +228,7 @@ func TestOIDCBindingExpiryPKCEAndConcurrentReplay(t *testing.T) {
 				for range 8 {
 					wg.Go(func() {
 						<-start
-						if s.Complete(t.Context(), state, browser, code, false) == nil {
+						if completeErr(s, t.Context(), state, browser, code, false) == nil {
 							success.Add(1)
 						}
 					})
@@ -257,11 +258,11 @@ func TestOIDCDiscoveryFailureRecoveryAndRestart(t *testing.T) {
 	state, browser, code := oidcFlow(t, s)
 	// A fresh service instance has no cached provider or wake state.
 	restarted := NewOIDC(db, s.cfg, "https://drop.test")
-	if err := restarted.Complete(t.Context(), state, browser, code, false); err != nil {
+	if err := completeErr(restarted, t.Context(), state, browser, code, false); err != nil {
 		t.Fatal(err)
 	}
 	p.SetFaults(oidctest.Faults{Unavailable: true})
-	if s.Complete(t.Context(), randomToken(), randomToken(), "private-code", false) == nil {
+	if completeErr(s, t.Context(), randomToken(), randomToken(), "private-code", false) == nil {
 		t.Fatal("missing state accepted")
 	}
 }
@@ -299,4 +300,10 @@ func TestOIDCTransactionBoundsAndReplacement(t *testing.T) {
 			t.Fatal("provider token column")
 		}
 	}
+}
+
+// completeErr keeps the existing failure-path tests focused on the error.
+func completeErr(s *OIDC, ctx context.Context, state, browser, code string, providerError bool) error {
+	_, err := s.Complete(ctx, state, browser, code, providerError)
+	return err
 }

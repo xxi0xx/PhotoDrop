@@ -71,14 +71,14 @@ func (a *application) immichProvision(w http.ResponseWriter, r *http.Request, _ 
 	}
 	writeJSON(w, 202, map[string]int64{"job_id": id})
 }
-func (a *application) immichTest(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+func (a *application) immichTest(w http.ResponseWriter, r *http.Request, s auth.Session) {
 	var input struct {
 		Target string `json:"target"`
 	}
 	if !decodeJSON(w, r, &input, 1024) {
 		return
 	}
-	if _, err := a.events.Get(r.Context(), internalID(r)); err != nil {
+	if _, err := a.events.Get(r.Context(), scope(s), internalID(r)); err != nil {
 		a.fail(w, err)
 		return
 	}

@@ -35,12 +35,17 @@ func TestPhase3OIDCUpgradePreservesPasswordAndSession(t *testing.T) {
 	db.Close()
 	for range 2 {
 		db = openTestDB(t, dir)
-		var hash, token, csrf, after string
-		if err = db.QueryRow("SELECT password_hash,token_hash,csrf_token FROM admin_credential,admin_sessions").Scan(&hash, &token, &csrf); err != nil {
+		var hash, after string
+		var sessions int
+		if err = db.QueryRow("SELECT password_hash FROM admin_credential").Scan(&hash); err != nil {
+			t.Fatal(err)
+		}
+		// Migration 013 deliberately resets sessions; the password credential survives.
+		if err = db.QueryRow("SELECT count(*) FROM host_sessions").Scan(&sessions); err != nil {
 			t.Fatal(err)
 		}
 		db.QueryRow("SELECT group_concat(checksum||applied_at) FROM (SELECT checksum,applied_at FROM schema_migrations WHERE version<=10 ORDER BY version)").Scan(&after)
-		if hash != "existing-hash" || token != "existing-token-hash" || csrf != "existing-csrf" || after != history || migrationCount(t, db) != 12 {
+		if hash != "existing-hash" || sessions != 0 || after != history || migrationCount(t, db) != latestMigration {
 			t.Fatal("upgrade modified previous auth/history")
 		}
 		var count int

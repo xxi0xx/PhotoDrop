@@ -73,7 +73,7 @@ func TestTurnstileSessionBoundaryHeadersAndBodies(t *testing.T) {
 				t.Fatal(err)
 			}
 			on := true
-			e, err := events.New(db).Create(t.Context(), events.Input{Name: "security", Enabled: &on})
+			e, err := events.New(db).Create(t.Context(), 1, events.Input{Name: "security", Enabled: &on})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -263,7 +263,7 @@ func TestMaintenanceRunsDuringUptimeAndStops(t *testing.T) {
 	}
 	h := srv.Handler.(*maintainedHandler)
 	on := true
-	e, err := events.New(db).Create(t.Context(), events.Input{Name: "maintenance", Enabled: &on})
+	e, err := events.New(db).Create(t.Context(), 1, events.Input{Name: "maintenance", Enabled: &on})
 	if err != nil {
 		t.Fatal(err)
 	}

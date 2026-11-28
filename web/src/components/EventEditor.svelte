@@ -4,10 +4,24 @@
   import { quotaDraft, quotaPayload, quotaModes, QuotaCalculationError } from '../lib/quotas';
   import ShareEvent from './ShareEvent.svelte';
   import { onMount, tick } from 'svelte';
-  import { request, message, publicURL, localDateTime, formatBytes, APIError, type EventRecord } from '../lib/api';
+  import { request, message, publicURL, localDateTime, formatBytes, APIError, type EventRecord, type HostRecord } from '../lib/api';
   import { initialTarget, suggestedAlbum, type ImmichTargets } from '../lib/immich';
-  let { id }: { id: string | null } = $props();
+  let { id, admin = false }: { id: string | null; admin?: boolean } = $props();
   let event = $state<EventRecord | null>(null);
+  // Ownership transfer is admin-only and allowed only before an Immich album exists.
+  let hosts = $state<HostRecord[]>([]); let newOwner = $state(0); let ownerBusy = $state(false); let ownerError = $state('');
+  async function loadHosts() {
+    if (!admin || !id) return;
+    try { hosts = (await request<{ hosts: HostRecord[] }>('/api/admin/hosts')).hosts.filter(host => !host.disabled); }
+    catch (cause) { ownerError = message(cause); }
+  }
+  async function transferOwner() {
+    if (!event || !newOwner || newOwner === event.owner.id) return;
+    ownerBusy = true; ownerError = ''; notice = '';
+    try { const saved = (await request<{ event: EventRecord }>(`/api/admin/events/${event.id}/owner`, 'PUT', { host_id: newOwner })).event; event = { ...event, owner: saved.owner }; newOwner = 0; notice = `This event now belongs to ${saved.owner.display_name}.`; }
+    catch (cause) { ownerError = message(cause); }
+    finally { ownerBusy = false; }
+  }
   let name = $state(''); let description = $state(''); let eventDate = $state(''); let enabled = $state(true); let expiration = $state('');
   let quotas = $state(quotaDraft(null));
   let modes = $state(quotaModes(null));
@@ -30,7 +44,7 @@
     try { apply((await request<{ event: EventRecord }>(`/api/admin/events/${id}`)).event); }
     catch (cause) { loadError = message(cause); } finally { loading = false; }
   }
-  onMount(() => { void load(); });
+  onMount(() => { void load(); void loadHosts(); });
   async function save(submit: SubmitEvent) {
     submit.preventDefault(); busy = true; error = ''; notice = ''; fields = {};
     try {
@@ -104,6 +118,13 @@
       <QuotaEditor bind:draft={quotas} bind:modes {event} {fields} disabled={busy || !!event?.deleting} />
     </section>
     <div class="actions save-actions"><button type="submit" disabled={busy || event?.deleting}>{busy ? 'Saving…' : id ? 'Save changes' : 'Create event'}</button><a href="/admin">Cancel</a></div></form>
+    {#if event && admin}<section class="section-card" aria-labelledby="owner-heading"><h2 id="owner-heading">Host</h2>
+      <p>This event belongs to <strong>{event.owner.display_name}</strong>. Its Immich albums are created in that host's Immich account.</p>
+      {#if hosts.length > 1}<div class="field"><label for="event-owner">Move to another host</label><select id="event-owner" bind:value={newOwner} disabled={ownerBusy || event.deleting}><option value={0}>Choose a host</option>{#each hosts.filter(host => host.id !== event?.owner.id) as host (host.id)}<option value={host.id}>{host.display_name}</option>{/each}</select></div>
+        <button type="button" class="secondary" disabled={ownerBusy || !newOwner || event.deleting} onclick={transferOwner}>{ownerBusy ? 'Moving…' : 'Change host'}</button>
+        <p class="hint">Possible only before an Immich album exists for this event. Immich setup that hasn't created an album yet is removed.</p>{/if}
+      {#if ownerError}<p class="error" role="alert">{ownerError}</p>{/if}
+    </section>{/if}
     {#if event}<Immich eventID={event.id} deleting={event.deleting} />{/if}
     {#if event}<section class="section-card" aria-labelledby="export-heading"><h2 id="export-heading">Export</h2><p>Keep original files and a portable manifest with the PhotoDrop CLI.</p><code class="export-command">photodrop export --event {event.id} --output /export/event-{event.id}</code><button type="button" class="secondary" onclick={copyExport}>Copy export command</button><p class="hint">Run on your PhotoDrop host. Mount a writable /export directory for Docker, and choose a new output directory for each export.</p></section>{/if}
     {#if event}<section class="delete-panel" aria-labelledby="delete-heading"><h2 id="delete-heading">Danger zone</h2>

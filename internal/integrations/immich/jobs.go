@@ -131,13 +131,13 @@ func (s *Service) Provision(ctx context.Context, eventID int64, key, name string
 	return s.enqueue(ctx, eventID, key, name, "new", true)
 }
 
-func (s *Service) CreateEvent(ctx context.Context, input events.Input, key, name string, autoImport bool) (events.Event, error) {
+func (s *Service) CreateEvent(ctx context.Context, ownerHostID int64, input events.Input, key, name string, autoImport bool) (events.Event, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return events.Event{}, err
 	}
 	defer tx.Rollback()
-	event, err := events.CreateInTx(ctx, tx, input)
+	event, err := events.CreateInTx(ctx, tx, ownerHostID, input)
 	if err != nil {
 		return events.Event{}, err
 	}

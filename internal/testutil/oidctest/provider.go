@@ -26,6 +26,8 @@ type Faults struct {
 	MissingSubject, Expired, BadSignature, NoIDToken, TokenFailure bool
 	Groups                                                         any
 	GroupsClaim                                                    string
+	// Profile claims, omitted when empty.
+	Email, Name, PreferredUsername string
 }
 type flow struct{ Nonce, Challenge, Redirect string }
 type Provider struct {
@@ -160,6 +162,11 @@ func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			groupClaim = "groups"
 		}
 		claims := map[string]any{"iss": issuer, "aud": audience, "sub": subject, "iat": time.Now().Unix(), "exp": exp, "nonce": nonce, groupClaim: groups}
+		for name, value := range map[string]string{"email": f.Email, "name": f.Name, "preferred_username": f.PreferredUsername} {
+			if value != "" {
+				claims[name] = value
+			}
+		}
 		key := p.key
 		if f.BadSignature {
 			key = p.badKey

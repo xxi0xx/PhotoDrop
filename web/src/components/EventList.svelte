@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { request, message, displayDate, formatBytes, type EventRecord } from '../lib/api';
+  let { admin = false }: { admin?: boolean } = $props();
   let events = $state<EventRecord[]>([]); let loading = $state(true); let error = $state('');
   async function load() {
     loading = true; error = '';
@@ -11,7 +12,7 @@
 </script>
 <svelte:head><title>Events · PhotoDrop Admin</title></svelte:head>
 <main class="workspace">
-  <div class="page-heading"><div><p class="eyebrow">Administration</p><h1>Your events</h1></div><a class="button" href="/admin/events/new">New Event</a></div>
+  <div class="page-heading"><div><p class="eyebrow">Administration</p><h1>{admin ? 'All events' : 'Your events'}</h1></div><a class="button" href="/admin/events/new">New Event</a></div>
   <p class="muted">Manage the details and availability of each event.</p>
   {#if loading}<p role="status">Loading events…</p>
   {:else if error}<p class="error" role="alert">{error}</p><button class="secondary" onclick={load}>Try again</button>
@@ -21,6 +22,7 @@
       <article class="event-card">
         <div class="event-card-top"><h2><a href={`/admin/events/${event.id}`}>{event.name}</a></h2><span class:open={event.status === 'open'} class="badge">{event.status === 'open' ? 'Open' : event.status === 'disabled' ? 'Disabled' : 'Expired'}</span></div>
         <p class="muted">{displayDate(event.event_date)}</p>
+        {#if admin}<p class="muted owner-label">Host: {event.owner.display_name}</p>{/if}
         <p class="media-stats">Files: {event.media.ready_count}{#if event.max_assets !== null} / {event.max_assets}{/if} · Storage: {formatBytes(event.media.storage_bytes)}{#if event.max_bytes !== null} / {formatBytes(event.max_bytes)}{/if}</p>
         {#if event.deleting}<p class="error">Media cleanup is pending. Open Manage and retry deletion.</p>{/if}
         <div class="event-card-bottom"><a href={event.public_url} target="_blank" rel="noopener noreferrer">Public event page ↗</a><a class="button secondary" href={`/admin/events/${event.id}`}>Manage<span class="sr-only"> {event.name}</span></a></div>

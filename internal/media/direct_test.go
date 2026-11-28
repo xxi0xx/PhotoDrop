@@ -285,7 +285,7 @@ func TestMixedProviderDeletionAndRetiredReplay(t *testing.T) {
 	if err := s.DeleteEvent(t.Context(), e.ID); !errors.Is(err, ErrDeleting) {
 		t.Fatal("partial deletion was not retained", err)
 	}
-	event, err := s.events.Get(t.Context(), e.ID)
+	event, err := s.events.Get(t.Context(), events.System, e.ID)
 	if err != nil || !event.Deleting || event.Enabled {
 		t.Fatal("partial delete reopened event")
 	}

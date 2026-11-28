@@ -462,7 +462,7 @@ func (s *Service) Cleanup(ctx context.Context) error {
 // leaves ready state BEFORE its files are removed, so partial cleanup never
 // counts missing files as completed. A retry continues from the remaining rows.
 func (s *Service) DeleteEvent(ctx context.Context, eventID int64) error {
-	event, err := s.events.Get(ctx, eventID)
+	event, err := s.events.Get(ctx, events.System, eventID)
 	if err != nil {
 		return err
 	}
