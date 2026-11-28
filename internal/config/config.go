@@ -36,6 +36,7 @@ type Config struct {
 	Security          Security
 	ImmichTarget      string
 	ImmichTargets     map[string]Immich `json:"-"`
+	Secrets           Secrets           `json:"-"`
 }
 
 // Formatting configuration must never expose passwords or object-store secrets.
@@ -104,6 +105,9 @@ func parse(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, err
 	}
 	if err := cfg.loadImmich(lookup); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.loadSecrets(lookup); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil

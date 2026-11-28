@@ -123,6 +123,50 @@ export environment variables. Version is build-time metadata. `PHOTODROP_IMAGE`
 is **Compose-only**: default `photodrop:local`, or a released GHCR tag/digest.
 `PHOTODROP_TEST_*` and browser-fixture switches are not production configuration.
 
+## Secrets key for linked accounts
+
+Hosts' linked Immich API keys are stored in SQLite encrypted with AES-256-GCM.
+The master key lives in a file outside `/data`, delivered as a Docker secret. Keys
+configured with `PHOTODROP_IMMICH_<KEY>_API_KEY` are not affected and stay in the
+environment.
+
+| Variable | Default / required | Format and effect | Sensitivity |
+| --- | --- | --- | --- |
+| `PHOTODROP_SECRETS_KEY_FILE` | empty / optional | Path to the active master key: a file holding 32 random bytes in base64 (standard or URL-safe). Generate with `openssl rand -base64 32`. On Linux the file must not be readable by group or other (`chmod 400`) | Path; the file is a secret |
+| `PHOTODROP_SECRETS_PREVIOUS_KEY_FILES` | empty | Up to 8 comma-separated paths to retired keys, used only to decrypt. Requires an active key | Paths; the files are secrets |
+
+With no key, PhotoDrop starts normally and linking Immich accounts is unavailable.
+A malformed, missing or over-permissive key file stops startup with an error that
+names the file but never its contents. The container runs as uid 10001, and
+Compose file secrets keep the host file's owner, so the key file must be owned by
+10001:
+
+```sh
+mkdir -p secrets
+openssl rand -base64 32 > secrets/photodrop_secrets_key
+sudo chown 10001:10001 secrets/photodrop_secrets_key
+sudo chmod 400 secrets/photodrop_secrets_key
+```
+
+```yaml
+services:
+  photodrop:
+    secrets: [photodrop_secrets_key]
+    environment:
+      PHOTODROP_SECRETS_KEY_FILE: /run/secrets/photodrop_secrets_key
+secrets:
+  photodrop_secrets_key:
+    file: ./secrets/photodrop_secrets_key
+```
+
+To rotate: make the new key active, list the old file in
+`PHOTODROP_SECRETS_PREVIOUS_KEY_FILES`, restart, then run
+`docker compose exec --user 10001 photodrop photodrop rotate-secrets`. It
+re-encrypts every stored credential under the active key and prints counts only.
+It changes nothing if any credential cannot be decrypted with a loaded key. Then
+remove the old key. Back the key up separately from `/data`; see
+[backup and restore](backup-restore.md#secrets-key).
+
 ## Event upload policy
 
 The administrator editor can calculate typed storage from count × individual

@@ -32,6 +32,8 @@ labels. Limits/quotas bound abuse; signature sniffing is not malware analysis.
 Export streams ready assets to ordinary files/manifest. Immich jobs persist/recover
 in SQLite; Immich remains independent with separate originals/backups. Credentials
 stay in runtime configuration, never frontend bundles or backend identity records.
+The exception is hosts' linked Immich keys, stored encrypted under a master key
+file outside `/data` (`internal/secrets`; see [security](security.md#stored-credentials)).
 
 Native OIDC is optional login for administrators and hosts: authorization-code +
 PKCE with lazy discovery and signed ID-token validation, then the same opaque local

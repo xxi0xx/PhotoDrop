@@ -34,6 +34,21 @@ ownership transfer are admin-only (`403` for hosts). Disabling a host deletes it
 sessions in the same transaction. The host list never exposes OIDC issuers or
 subjects. Email and display name come from ID-token claims and are labels only.
 
+## Stored credentials
+
+Keys configured in the environment never touch SQLite. The one exception, for hosts
+who link their own Immich account, is stored only as AES-256-GCM ciphertext. The
+cipher key is derived with HKDF-SHA256 from a master key file outside `/data`
+(`PHOTODROP_SECRETS_KEY_FILE`); each ciphertext has a fresh random 96-bit nonce and
+additional authenticated data naming its account, provider, Immich target, remote
+user and remote key id, so a ciphertext copied onto another row fails to decrypt.
+Each row records which master key encrypted it (the first 16 hex characters of a
+SHA-256 of the key), so retired keys can still decrypt until `rotate-secrets` has
+re-encrypted everything. Startup rejects a malformed key file and, on Linux, one
+readable or writable by group or other. Plaintext credentials exist only in memory
+while a request to Immich is built and are never logged, returned by the API or
+written to errors. See [configuration](configuration.md#secrets-key-for-linked-accounts).
+
 ## Optional Turnstile
 
 Set both `PHOTODROP_TURNSTILE_SITE_KEY` and `PHOTODROP_TURNSTILE_SECRET_KEY`, or
