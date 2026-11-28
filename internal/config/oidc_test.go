@@ -61,6 +61,30 @@ func TestOIDCConfiguration(t *testing.T) {
 			})
 		}
 	}
+	// Any one of the four role lists satisfies validation; the host lists parse
+	// with the same rules as the admin lists.
+	for _, key := range []string{"PHOTODROP_OIDC_ALLOWED_SUBJECTS", "PHOTODROP_OIDC_ALLOWED_GROUPS", "PHOTODROP_OIDC_HOST_SUBJECTS", "PHOTODROP_OIDC_HOST_GROUPS"} {
+		env := oidcEnv()
+		delete(env, "PHOTODROP_OIDC_ALLOWED_GROUPS")
+		env[key] = " first , second "
+		c, err := parseEnv(env)
+		if err != nil {
+			t.Fatal(key, err)
+		}
+		got := map[string][]string{"PHOTODROP_OIDC_ALLOWED_SUBJECTS": c.OIDC.AllowedSubjects, "PHOTODROP_OIDC_ALLOWED_GROUPS": c.OIDC.AllowedGroups, "PHOTODROP_OIDC_HOST_SUBJECTS": c.OIDC.HostSubjects, "PHOTODROP_OIDC_HOST_GROUPS": c.OIDC.HostGroups}[key]
+		if strings.Join(got, "|") != "first|second" {
+			t.Fatal(key, got)
+		}
+		env[key] = "a,,b"
+		if _, err := parseEnv(env); err == nil {
+			t.Fatal(key, "malformed list accepted")
+		}
+	}
+	env := oidcEnv()
+	delete(env, "PHOTODROP_OIDC_ALLOWED_GROUPS")
+	if _, err := parseEnv(env); err == nil || !strings.Contains(err.Error(), "PHOTODROP_OIDC_HOST_GROUPS") {
+		t.Fatal("OIDC accepted no role list", err)
+	}
 	for _, issuer := range []string{"https://auth.test/path/", "http://localhost:5555/application/o/test/", "http://127.0.0.1:5555/", "http://[::1]/"} {
 		env := oidcEnv()
 		env["PHOTODROP_OIDC_ISSUER"] = issuer

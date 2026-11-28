@@ -18,6 +18,24 @@ Use the same overlays throughout. Check logs privately, sign in, verify an exist
 event/public link/counts, then test upload/export. Startup validates checksums and
 applies new migrations transactionally.
 
+## Upgrading to multi-host accounts (next release)
+
+Migration 013 adds hosts and event ownership. It needs no configuration change:
+
+- **Everyone signs in again.** Sessions now name their host, so the migration
+  resets them. The password credential is kept.
+- **Sign in as the administrator first.** Host 1 is the existing administrator and
+  owns every event created before the upgrade. Password sign-in always uses host 1.
+  The first OIDC sign-in by an identity in the admin lists claims host 1; any later
+  admin identity becomes a separate host. So, with OIDC enabled, sign in with your
+  own admin identity before anyone else does.
+- **Add hosts when ready.** Set `PHOTODROP_OIDC_HOST_GROUPS` (or `_HOST_SUBJECTS`)
+  and recreate PhotoDrop. Hosts see only their own events. Without host lists,
+  PhotoDrop behaves as before.
+
+Rollback after the upgrade needs the stopped pre-upgrade backup: an older binary
+refuses a database with migration 013 applied.
+
 ## v1.2.0 to v1.2.1
 
 Dependency and security update; no migrations or configuration changes. go-jose

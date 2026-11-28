@@ -4,25 +4,35 @@ PhotoDrop intentionally lets anyone holding an event link submit images without
 an account. Links may leak or be forwarded; random event IDs are not passwords.
 Guest headers, names, MIME declarations, tokens, and media bodies are untrusted.
 Gate 5 bounds anonymous grants and reservations and reduces request/CPU abuse.
-It assumes one application process per data directory and a trusted administrator
-and host. Compromised administrator/storage credentials, hostile host access,
+It assumes one application process per data directory and trusted administrators
+and a trusted server host. Compromised administrator/storage credentials, hostile host access,
 distributed limits, and full DDoS mitigation are outside this model.
 
-## Administrator authentication
+## Administrator and host authentication
 
-Password authentication remains the default. PhotoDrop 1.1.0 also supports native
-OIDC-only or password+OIDC login with explicit subject/group allowlists. OIDC
+Password authentication remains the default and signs in the original
+administrator (host 1). PhotoDrop also supports native OIDC-only or password+OIDC
+login with explicit subject/group lists that grant the admin or host role. OIDC
 terminates at PhotoDrop and issues the same 12-hour local sessions; public pages
 and uploads have no OIDC dependency. Startup never contacts the provider. See
 [protocol, authorization, outage and revocation semantics](oidc.md).
 
 Provider access/refresh/ID tokens and authorization codes are never persisted.
 Migration 011 contains only five-minute transaction hashes and PKCE verifiers.
-All admin mutations retain Origin/CSRF checks. Password rotation revokes sessions
-created through either method. OIDC initiation/callback share separate limits of
+All admin mutations retain Origin/CSRF checks. Password rotation revokes host 1's
+sessions created through either method. OIDC initiation/callback share separate limits of
 20 requests per minute per client IP and 60 globally (scaled by the existing
 multiplier), two concurrent requests, and a 512-transaction cap. The password
 and guest request budgets remain separate.
+
+Each session names its host, and every request re-reads that host's current role
+and disabled flag. A host sees and changes only events it owns: every
+`/api/admin/events/{id}*` route checks ownership before doing anything and answers
+`404` for another host's event, exactly as for a missing one, so event ids cannot
+be probed. Event reads and updates are also scoped in SQL. Host administration and
+ownership transfer are admin-only (`403` for hosts). Disabling a host deletes its
+sessions in the same transaction. The host list never exposes OIDC issuers or
+subjects. Email and display name come from ID-token claims and are labels only.
 
 ## Optional Turnstile
 

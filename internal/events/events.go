@@ -34,6 +34,13 @@ type Event struct {
 	MaxVideoFileBytes    *int64     `json:"max_video_file_bytes"`
 	MaxPhotoStorageBytes *int64     `json:"max_photo_storage_bytes"`
 	MaxVideoStorageBytes *int64     `json:"max_video_storage_bytes"`
+	Owner                Owner      `json:"owner"`
+}
+
+// Owner is the host an event belongs to.
+type Owner struct {
+	ID          int64  `json:"id"`
+	DisplayName string `json:"display_name"`
 }
 
 // Input deliberately has no internal/public identifier or audit timestamps.
@@ -151,13 +158,42 @@ type Store struct{ db *sql.DB }
 
 func New(db *sql.DB) *Store { return &Store{db: db} }
 
-const columns = "id, public_id, name, description, event_date, enabled, expires_at, created_at, updated_at, deleting, max_assets, max_bytes, max_photos, max_videos, max_photo_file_bytes, max_video_file_bytes, max_photo_storage_bytes, max_video_storage_bytes"
+const columns = "id, public_id, name, description, event_date, enabled, expires_at, created_at, updated_at, deleting, max_assets, max_bytes, max_photos, max_videos, max_photo_file_bytes, max_video_file_bytes, max_photo_storage_bytes, max_video_storage_bytes, owner_host_id"
 
-func scan(row interface{ Scan(...any) error }) (Event, error) {
+// named selects the event columns plus the owner's display name. RETURNING
+// clauses use columns alone and read the name afterwards.
+const named = columns + ", (SELECT display_name FROM hosts WHERE hosts.id = events.owner_host_id)"
+
+// Scope limits which events a caller sees. A host sees only its own events;
+// an administrator sees all of them.
+type Scope struct {
+	HostID int64
+	All    bool
+}
+
+// System is the scope for internal work that is not acting for a signed-in
+// host, such as media cleanup, exports and import jobs.
+var System = Scope{All: true}
+
+type querier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func scanNamed(row interface{ Scan(...any) error }) (Event, error) {
+	var name string
+	e, err := scanInto(row, &name)
+	e.Owner.DisplayName = name
+	return e, err
+}
+
+func scan(row interface{ Scan(...any) error }) (Event, error) { return scanInto(row) }
+
+func scanInto(row interface{ Scan(...any) error }, extra ...any) (Event, error) {
 	var e Event
 	var expiry *string
 	var created, updated string
-	if err := row.Scan(&e.ID, &e.PublicID, &e.Name, &e.Description, &e.EventDate, &e.Enabled, &expiry, &created, &updated, &e.Deleting, &e.MaxAssets, &e.MaxBytes, &e.MaxPhotos, &e.MaxVideos, &e.MaxPhotoFileBytes, &e.MaxVideoFileBytes, &e.MaxPhotoStorageBytes, &e.MaxVideoStorageBytes); err != nil {
+	dest := []any{&e.ID, &e.PublicID, &e.Name, &e.Description, &e.EventDate, &e.Enabled, &expiry, &created, &updated, &e.Deleting, &e.MaxAssets, &e.MaxBytes, &e.MaxPhotos, &e.MaxVideos, &e.MaxPhotoFileBytes, &e.MaxVideoFileBytes, &e.MaxPhotoStorageBytes, &e.MaxVideoStorageBytes, &e.Owner.ID}
+	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return Event{}, err
 	}
 	var err error
@@ -184,19 +220,25 @@ func expiryValue(t *time.Time) any {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-func (s *Store) Create(ctx context.Context, input Input) (Event, error) {
-	return create(ctx, s.db, input)
+// Create makes an event owned by ownerHostID, normally the signed-in host.
+func (s *Store) Create(ctx context.Context, ownerHostID int64, input Input) (Event, error) {
+	return create(ctx, s.db, ownerHostID, input)
 }
 
 // CreateInTx lets the application atomically attach local setup to a new event.
 // The caller owns commit/rollback; no external I/O belongs in this transaction.
-func CreateInTx(ctx context.Context, tx *sql.Tx, input Input) (Event, error) {
-	return create(ctx, tx, input)
+func CreateInTx(ctx context.Context, tx *sql.Tx, ownerHostID int64, input Input) (Event, error) {
+	return create(ctx, tx, ownerHostID, input)
 }
 
-func create(ctx context.Context, db interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, input Input) (Event, error) {
+func withOwnerName(ctx context.Context, db querier, e Event) (Event, error) {
+	if err := db.QueryRowContext(ctx, "SELECT display_name FROM hosts WHERE id = ?", e.Owner.ID).Scan(&e.Owner.DisplayName); err != nil {
+		return Event{}, fmt.Errorf("read event owner: %w", err)
+	}
+	return e, nil
+}
+
+func create(ctx context.Context, db querier, ownerHostID int64, input Input) (Event, error) {
 	e, err := validate(input)
 	if err != nil {
 		return Event{}, err
@@ -204,9 +246,9 @@ func create(ctx context.Context, db interface {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for range 3 {
 		row := db.QueryRowContext(ctx, `INSERT INTO events
-		    (public_id, name, description, event_date, enabled, expires_at, created_at, updated_at, max_assets, max_bytes, max_photos, max_videos, max_photo_file_bytes, max_video_file_bytes, max_photo_storage_bytes, max_video_storage_bytes)
-		    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(public_id) DO NOTHING RETURNING `+columns,
-			newPublicID(), e.Name, e.Description, e.EventDate, e.Enabled, expiryValue(e.ExpiresAt), now, now, e.MaxAssets, e.MaxBytes, e.MaxPhotos, e.MaxVideos, e.MaxPhotoFileBytes, e.MaxVideoFileBytes, e.MaxPhotoStorageBytes, e.MaxVideoStorageBytes)
+		    (public_id, name, description, event_date, enabled, expires_at, created_at, updated_at, max_assets, max_bytes, max_photos, max_videos, max_photo_file_bytes, max_video_file_bytes, max_photo_storage_bytes, max_video_storage_bytes, owner_host_id)
+		    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(public_id) DO NOTHING RETURNING `+columns,
+			newPublicID(), e.Name, e.Description, e.EventDate, e.Enabled, expiryValue(e.ExpiresAt), now, now, e.MaxAssets, e.MaxBytes, e.MaxPhotos, e.MaxVideos, e.MaxPhotoFileBytes, e.MaxVideoFileBytes, e.MaxPhotoStorageBytes, e.MaxVideoStorageBytes, ownerHostID)
 		saved, err := scan(row)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
@@ -214,20 +256,21 @@ func create(ctx context.Context, db interface {
 		if err != nil {
 			return Event{}, fmt.Errorf("create event: %w", err)
 		}
-		return saved, nil
+		return withOwnerName(ctx, db, saved)
 	}
 	return Event{}, fmt.Errorf("allocate unique public event identifier")
 }
 
-func (s *Store) List(ctx context.Context) ([]Event, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM events ORDER BY id DESC")
+// List returns the events visible in scope, newest first.
+func (s *Store) List(ctx context.Context, scope Scope) ([]Event, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+named+" FROM events WHERE ? OR owner_host_id = ? ORDER BY id DESC", scope.All, scope.HostID)
 	if err != nil {
 		return nil, fmt.Errorf("list events: %w", err)
 	}
 	defer rows.Close()
 	result := []Event{}
 	for rows.Next() {
-		e, err := scan(rows)
+		e, err := scanNamed(rows)
 		if err != nil {
 			return nil, fmt.Errorf("read event: %w", err)
 		}
@@ -239,40 +282,54 @@ func (s *Store) List(ctx context.Context) ([]Event, error) {
 	return result, nil
 }
 
-func (s *Store) Get(ctx context.Context, id int64) (Event, error) {
-	e, err := scan(s.db.QueryRowContext(ctx, "SELECT "+columns+" FROM events WHERE id = ?", id))
+// Get returns an event in scope. An event outside scope is sql.ErrNoRows, the
+// same as one that does not exist.
+func (s *Store) Get(ctx context.Context, scope Scope, id int64) (Event, error) {
+	e, err := scanNamed(s.db.QueryRowContext(ctx, "SELECT "+named+" FROM events WHERE id = ? AND (? OR owner_host_id = ?)", id, scope.All, scope.HostID))
 	if err != nil {
 		return Event{}, fmt.Errorf("get event: %w", err)
 	}
 	return e, nil
 }
 
+// OwnerOf returns an event's owner host id, or sql.ErrNoRows.
+func (s *Store) OwnerOf(ctx context.Context, id int64) (int64, error) {
+	var owner int64
+	if err := s.db.QueryRowContext(ctx, "SELECT owner_host_id FROM events WHERE id = ?", id).Scan(&owner); err != nil {
+		return 0, fmt.Errorf("get event owner: %w", err)
+	}
+	return owner, nil
+}
+
 func (s *Store) GetPublic(ctx context.Context, id string) (Event, error) {
 	if !ValidPublicID(id) {
 		return Event{}, sql.ErrNoRows
 	}
-	e, err := scan(s.db.QueryRowContext(ctx, "SELECT "+columns+" FROM events WHERE public_id = ?", id))
+	e, err := scanNamed(s.db.QueryRowContext(ctx, "SELECT "+named+" FROM events WHERE public_id = ?", id))
 	if err != nil {
 		return Event{}, fmt.Errorf("get public event: %w", err)
 	}
 	return e, nil
 }
 
-func (s *Store) Update(ctx context.Context, id int64, input Input) (Event, error) {
+// Update changes an event in scope; one outside scope is sql.ErrNoRows.
+func (s *Store) Update(ctx context.Context, scope Scope, id int64, input Input) (Event, error) {
 	e, err := validate(input)
 	if err != nil {
 		return Event{}, err
 	}
 	row := s.db.QueryRowContext(ctx, `UPDATE events SET name = ?, description = ?, event_date = ?,
-	    enabled = ?, expires_at = ?, updated_at = ?, max_assets = ?, max_bytes = ?, max_photos = ?, max_videos = ?, max_photo_file_bytes = ?, max_video_file_bytes = ?, max_photo_storage_bytes = ?, max_video_storage_bytes = ? WHERE id = ? AND deleting = 0 RETURNING `+columns,
-		e.Name, e.Description, e.EventDate, e.Enabled, expiryValue(e.ExpiresAt), time.Now().UTC().Format(time.RFC3339Nano), e.MaxAssets, e.MaxBytes, e.MaxPhotos, e.MaxVideos, e.MaxPhotoFileBytes, e.MaxVideoFileBytes, e.MaxPhotoStorageBytes, e.MaxVideoStorageBytes, id)
+	    enabled = ?, expires_at = ?, updated_at = ?, max_assets = ?, max_bytes = ?, max_photos = ?, max_videos = ?, max_photo_file_bytes = ?, max_video_file_bytes = ?, max_photo_storage_bytes = ?, max_video_storage_bytes = ? WHERE id = ? AND deleting = 0 AND (? OR owner_host_id = ?) RETURNING `+columns,
+		e.Name, e.Description, e.EventDate, e.Enabled, expiryValue(e.ExpiresAt), time.Now().UTC().Format(time.RFC3339Nano), e.MaxAssets, e.MaxBytes, e.MaxPhotos, e.MaxVideos, e.MaxPhotoFileBytes, e.MaxVideoFileBytes, e.MaxPhotoStorageBytes, e.MaxVideoStorageBytes, id, scope.All, scope.HostID)
 	e, err = scan(row)
 	if err != nil {
 		return Event{}, fmt.Errorf("update event: %w", err)
 	}
-	return e, nil
+	return withOwnerName(ctx, s.db, e)
 }
 
+// Delete removes the event row. Media cleanup and the caller's ownership check
+// happen before this; see media.Service.DeleteEvent.
 func (s *Store) Delete(ctx context.Context, id int64) error {
 	res, err := s.db.ExecContext(ctx, "DELETE FROM events WHERE id = ?", id)
 	if err != nil {
@@ -286,4 +343,65 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+var (
+	// ErrOwnerHost means the new owner does not exist or is disabled.
+	ErrOwnerHost = errors.New("choose an enabled host as the new owner")
+	// ErrOwnerLocked means an Immich album already exists in the current owner's
+	// account, so the event can no longer change owner.
+	ErrOwnerLocked = errors.New("this event has an Immich album in its owner's account, so its owner can no longer change")
+	// ErrOwnerBusy means an Immich job for the event is queued or running.
+	ErrOwnerBusy = errors.New("wait for or cancel the active Immich import before changing the owner")
+)
+
+// TransferOwner moves an event to another host while no Immich album exists for
+// it. Bindings still in state 'new' are deleted with the transfer, because they
+// were chosen for the previous owner's account.
+func (s *Store) TransferOwner(ctx context.Context, id, hostID int64) (Event, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Event{}, fmt.Errorf("begin owner transfer: %w", err)
+	}
+	defer tx.Rollback()
+	var deleting bool
+	if err := tx.QueryRowContext(ctx, "SELECT deleting FROM events WHERE id = ?", id).Scan(&deleting); err != nil {
+		return Event{}, fmt.Errorf("get event: %w", err)
+	}
+	if deleting {
+		return Event{}, sql.ErrNoRows
+	}
+	var enabled bool
+	if err := tx.QueryRowContext(ctx, "SELECT disabled = 0 FROM hosts WHERE id = ?", hostID).Scan(&enabled); err != nil || !enabled {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return Event{}, fmt.Errorf("get new owner: %w", err)
+		}
+		return Event{}, ErrOwnerHost
+	}
+	var albums, active int
+	if err := tx.QueryRowContext(ctx, `SELECT
+	    (SELECT count(*) FROM immich_event_imports WHERE event_id = ? AND album_state <> 'new'),
+	    (SELECT count(*) FROM integration_jobs j JOIN immich_event_imports b ON b.id = j.event_import_id WHERE b.event_id = ? AND j.status IN ('queued','running'))`, id, id).Scan(&albums, &active); err != nil {
+		return Event{}, fmt.Errorf("check event bindings: %w", err)
+	}
+	if active > 0 {
+		return Event{}, ErrOwnerBusy
+	}
+	if albums > 0 {
+		return Event{}, ErrOwnerLocked
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM immich_event_imports WHERE event_id = ? AND album_state = 'new'", id); err != nil {
+		return Event{}, fmt.Errorf("remove unprovisioned bindings: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "UPDATE events SET owner_host_id = ?, updated_at = ? WHERE id = ?", hostID, time.Now().UTC().Format(time.RFC3339Nano), id); err != nil {
+		return Event{}, fmt.Errorf("transfer owner: %w", err)
+	}
+	e, err := scanNamed(tx.QueryRowContext(ctx, "SELECT "+named+" FROM events WHERE id = ?", id))
+	if err != nil {
+		return Event{}, fmt.Errorf("get event: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return Event{}, fmt.Errorf("commit owner transfer: %w", err)
+	}
+	return e, nil
 }

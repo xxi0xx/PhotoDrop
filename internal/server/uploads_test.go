@@ -40,11 +40,11 @@ func TestAnonymousUploadHTTP(t *testing.T) {
 	}
 	enabled := true
 	eventsStore := events.New(db)
-	e, err := eventsStore.Create(t.Context(), events.Input{Name: "Upload API", Enabled: &enabled})
+	e, err := eventsStore.Create(t.Context(), 1, events.Input{Name: "Upload API", Enabled: &enabled})
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := eventsStore.Create(t.Context(), events.Input{Name: "Other event", Enabled: &enabled})
+	other, err := eventsStore.Create(t.Context(), 1, events.Input{Name: "Other event", Enabled: &enabled})
 	if err != nil {
 		t.Fatal(err)
 	}

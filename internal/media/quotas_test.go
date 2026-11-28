@@ -208,7 +208,7 @@ func TestQuotaLowerRaiseReleaseAndExpiry(t *testing.T) {
 	// Lowering preserves ready media; raising/removing the quota restores capacity.
 	enabled := true
 	one := int64(1)
-	if _, err := s.events.Update(t.Context(), e.ID, events.Input{Name: e.Name, Enabled: &enabled, MaxAssets: &one, MaxBytes: &one}); err != nil {
+	if _, err := s.events.Update(t.Context(), events.System, e.ID, events.Input{Name: e.Name, Enabled: &enabled, MaxAssets: &one, MaxBytes: &one}); err != nil {
 		t.Fatal(err)
 	}
 	if countAssets(t, s, "ready") != 2 {
@@ -217,7 +217,7 @@ func TestQuotaLowerRaiseReleaseAndExpiry(t *testing.T) {
 	if _, err := s.Prepare(t.Context(), e.PublicID, session.ID, Preparation{"over.png", size, "image/png", randomID(), ""}, 1024*1024); !errors.Is(err, ErrEventQuota) {
 		t.Fatal(err)
 	}
-	if _, err := s.events.Update(t.Context(), e.ID, events.Input{Name: e.Name, Enabled: &enabled}); err != nil {
+	if _, err := s.events.Update(t.Context(), events.System, e.ID, events.Input{Name: e.Name, Enabled: &enabled}); err != nil {
 		t.Fatal(err)
 	}
 	inflight := prepare(t, s, e, session, "image/png", data)

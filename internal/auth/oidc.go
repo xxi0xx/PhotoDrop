@@ -118,64 +118,91 @@ func (s *OIDC) Begin(ctx context.Context, previousBrowser string) (location, bro
 
 // Complete consumes valid browser-bound state before any exchange. A failed or
 // concurrent callback cannot retry the transaction; start a new sign-in instead.
-func (s *OIDC) Complete(ctx context.Context, state, browser, code string, providerError bool) error {
+// The returned identity's role comes from the configured lists at this login:
+// the admin lists win over the host lists, and no match is ErrOIDC.
+func (s *OIDC) Complete(ctx context.Context, state, browser, code string, providerError bool) (Identity, error) {
 	if !validToken(state) || !validToken(browser) {
-		return ErrOIDC
+		return Identity{}, ErrOIDC
 	}
 	var nonceHash, verifier string
 	err := s.db.QueryRowContext(ctx, `DELETE FROM oidc_transactions WHERE state_hash=? AND browser_hash=? AND expires_at>? RETURNING nonce_hash,pkce_verifier`, tokenHash(state), tokenHash(browser), time.Now().Unix()).Scan(&nonceHash, &verifier)
 	if err != nil || providerError || code == "" || len(code) > 4096 {
-		return ErrOIDC
+		return Identity{}, ErrOIDC
 	}
 	p, err := s.discover(ctx)
 	if err != nil {
-		return ErrOIDC
+		return Identity{}, ErrOIDC
 	}
 	token, err := s.oauth(p).Exchange(oidc.ClientContext(ctx, s.client), code, oauth2.VerifierOption(verifier))
 	if err != nil {
-		return ErrOIDC
+		return Identity{}, ErrOIDC
 	}
 	raw, ok := token.Extra("id_token").(string)
 	if !ok || raw == "" {
-		return ErrOIDC
+		return Identity{}, ErrOIDC
 	}
 	id, err := p.Verifier(&oidc.Config{ClientID: s.cfg.ClientID}).Verify(ctx, raw)
 	if err != nil || id.Issuer != s.cfg.Issuer || strings.TrimSpace(id.Subject) == "" || subtle.ConstantTimeCompare([]byte(tokenHash(id.Nonce)), []byte(nonceHash)) != 1 {
-		return ErrOIDC
+		return Identity{}, ErrOIDC
 	}
 	var claims map[string]json.RawMessage
 	if err = id.Claims(&claims); err != nil {
-		return ErrOIDC
+		return Identity{}, ErrOIDC
 	}
 	// OIDC Core recommends checking azp for multiple audiences and whenever present.
 	if value, exists := claims["azp"]; exists {
 		var party string
 		if json.Unmarshal(value, &party) != nil || party != s.cfg.ClientID {
-			return ErrOIDC
+			return Identity{}, ErrOIDC
 		}
 	} else if len(id.Audience) > 1 {
-		return ErrOIDC
+		return Identity{}, ErrOIDC
 	}
-	allowed := slices.Contains(s.cfg.AllowedSubjects, id.Subject)
-	if len(s.cfg.AllowedGroups) > 0 {
+	var groups []string
+	if len(s.cfg.AllowedGroups)+len(s.cfg.HostGroups) > 0 {
 		if value, exists := claims[s.cfg.GroupsClaim]; exists {
-			var groups []json.RawMessage
-			if json.Unmarshal(value, &groups) != nil || groups == nil {
-				return ErrOIDC
+			var entries []json.RawMessage
+			if json.Unmarshal(value, &entries) != nil || entries == nil {
+				return Identity{}, ErrOIDC
 			}
-			for _, entry := range groups {
+			for _, entry := range entries {
 				var group string
 				if len(entry) == 0 || entry[0] != '"' || json.Unmarshal(entry, &group) != nil {
-					return ErrOIDC
+					return Identity{}, ErrOIDC
 				}
-				if slices.Contains(s.cfg.AllowedGroups, group) {
-					allowed = true
-				}
+				groups = append(groups, group)
 			}
 		}
 	}
-	if !allowed {
-		return ErrOIDC
+	matches := func(subjects, allowedGroups []string) bool {
+		if slices.Contains(subjects, id.Subject) {
+			return true
+		}
+		for _, group := range groups {
+			if slices.Contains(allowedGroups, group) {
+				return true
+			}
+		}
+		return false
 	}
-	return nil
+	result := Identity{Issuer: id.Issuer, Subject: id.Subject, Groups: groups}
+	switch {
+	case matches(s.cfg.AllowedSubjects, s.cfg.AllowedGroups):
+		result.Role = RoleAdmin
+	case matches(s.cfg.HostSubjects, s.cfg.HostGroups):
+		result.Role = RoleHost
+	default:
+		return Identity{}, ErrOIDC
+	}
+	// Profile claims are display data only. A claim of the wrong type is ignored.
+	text := func(name string) string {
+		var value string
+		if raw, ok := claims[name]; ok && json.Unmarshal(raw, &value) == nil {
+			return value
+		}
+		return ""
+	}
+	result.Email = text("email")
+	result.Name = DisplayName(text("name"), text("preferred_username"), result.Email)
+	return result, nil
 }

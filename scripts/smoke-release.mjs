@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes, createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { photo } from './photo-fixture.mjs';
@@ -127,10 +127,13 @@ try {
     }
     await start(image, volume);
     ({cookie, csrf} = backedUpSession);
-    // Existing cookie survives; then verify a fresh sign-in too.
-    await call('GET', '/api/admin/session'); await login();
+    // Migration 013 resets sessions, because they now name a host; older
+    // baselines must sign in again. Then verify a fresh sign-in works.
+    await call('GET', '/api/admin/session', undefined, oldMigrations.length < 13 ? 401 : 200); await login();
+    assert.deepEqual((await call('GET', '/api/admin/session')).body.host, {id:1, role:'admin', display_name:'Administrator'});
     const detailAfter=(await call('GET', `/api/admin/events/${event.id}`)).body;
     const oldDetail=structuredClone(detailAfter);
+    if(oldMigrations.length<13){assert.deepEqual(oldDetail.event.owner,{id:1,display_name:'Administrator'});delete oldDetail.event.owner;}
     if(oldMigrations.length<12) for(const field of typedFields){assert.equal(oldDetail.event[field],null);delete oldDetail.event[field];}
     assert.equal(oldDetail.event.media.photos.ready_count,2);
     assert.equal(oldDetail.event.media.videos.ready_count,localVideo?1:0);
@@ -169,7 +172,7 @@ try {
     }
     stop();
     const after=state('snapshot',volume);
-    assert.equal(after.schema_migrations.length,12);
+    assert.equal(after.schema_migrations.length,readdirSync('migrations').filter(name=>name.endsWith('.sql')).length);
     assert.deepEqual(after.schema_migrations.slice(0,oldMigrations.length),before.schema_migrations);
     for(const entry of after.schema_migrations.slice(oldMigrations.length)){
       assert.equal(entry.checksum,sha(readFileSync(`migrations/${entry.name}`,'utf8').replaceAll('\r\n','\n')));
@@ -177,6 +180,7 @@ try {
     const expected=structuredClone(before);
     expected.schema_migrations=after.schema_migrations;
     if(oldMigrations.length<10)for(const binding of expected.immich_event_imports) binding.auto_import=0;
+    if(oldMigrations.length<13)for(const event of expected.events) event.owner_host_id=1; // Host 1 owns pre-existing events.
     if(oldMigrations.length<12){
       for(const event of expected.events) for(const field of typedFields) event[field]=null;
       for(const asset of expected.assets){const mime=asset.status==='ready'?asset.mime_type:asset.expected_mime_type;asset.media_class=mime?.startsWith('video/')?'video':mime?.startsWith('image/')?'photo':null;}

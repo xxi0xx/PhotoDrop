@@ -47,7 +47,7 @@ type application struct {
 
 func (a *application) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/login", func(w http.ResponseWriter, r *http.Request) { a.page(w, http.StatusOK) })
-	for _, path := range []string{"/admin", "/admin/{$}", "/admin/events/new", "/admin/events/{id}"} {
+	for _, path := range []string{"/admin", "/admin/{$}", "/admin/events/new", "/admin/events/{id}", "/admin/hosts"} {
 		mux.HandleFunc("GET "+path, a.adminPage)
 	}
 	mux.HandleFunc("GET /e/{public_id}", a.publicPage)
@@ -65,18 +65,19 @@ func (a *application) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/admin/session", a.protected(func(w http.ResponseWriter, r *http.Request, s auth.Session) { writeJSON(w, 200, s) }))
 	mux.HandleFunc("GET /api/admin/events", a.protected(a.listEvents))
 	mux.HandleFunc("POST /api/admin/events", a.protected(a.createEvent))
-	mux.HandleFunc("GET /api/admin/events/{id}", a.protected(a.getEvent))
-	mux.HandleFunc("PUT /api/admin/events/{id}", a.protected(a.updateEvent))
-	mux.HandleFunc("DELETE /api/admin/events/{id}", a.protected(a.deleteEvent))
-	mux.HandleFunc("GET /api/admin/events/{id}/immich", a.protected(a.immichStatus))
+	for _, route := range a.eventRoutes() {
+		handler := a.owned(route.handle)
+		if route.admin {
+			handler = a.adminOnly(handler)
+		}
+		mux.HandleFunc(route.method+" "+route.path, a.protected(handler))
+	}
 	mux.HandleFunc("GET /api/admin/immich/targets", a.protected(a.immichTargets))
-	mux.HandleFunc("POST /api/admin/events/{id}/immich/album", a.protected(a.immichProvision))
-	mux.HandleFunc("PUT /api/admin/events/{id}/immich/auto-import", a.protected(a.immichAutoImport))
-	mux.HandleFunc("POST /api/admin/events/{id}/immich/test", a.protected(a.immichTest))
-	mux.HandleFunc("POST /api/admin/events/{id}/immich/jobs", a.protected(a.immichStart))
-	mux.HandleFunc("POST /api/admin/events/{id}/immich/cancel", a.protected(a.immichCancel))
+	mux.HandleFunc("GET /api/admin/hosts", a.protected(a.adminOnly(a.listHosts)))
+	mux.HandleFunc("PUT /api/admin/hosts/{id}", a.protected(a.adminOnly(a.updateHost)))
 	for path, methods := range map[string]string{
 		"/api/admin/auth/methods": "GET, HEAD", "/api/admin/oidc/login": "GET", "/api/admin/oidc/callback": "GET",
+		"/api/admin/hosts": "GET, HEAD", "/api/admin/hosts/{id}": "PUT", "/api/admin/events/{id}/owner": "PUT",
 		"/api/admin/immich/targets": "GET, HEAD", "/api/admin/events/{id}/immich/album": "POST",
 		"/api/admin/events/{id}/immich/auto-import": "PUT",
 		"/api/admin/events/{id}/immich":             "GET, HEAD", "/api/admin/events/{id}/immich/test": "POST", "/api/admin/events/{id}/immich/jobs": "POST", "/api/admin/events/{id}/immich/cancel": "POST",
@@ -94,6 +95,118 @@ func (a *application) routes(mux *http.ServeMux) {
 		})
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { apiError(w, 404, "not_found", "Not found", nil) })
+}
+
+type sessionHandler = func(http.ResponseWriter, *http.Request, auth.Session)
+
+// eventRoute is one /api/admin/events/{id}* route. Every such route is listed
+// here, so each one gets the same ownership check and the authorization test
+// covers all of them.
+type eventRoute struct {
+	method, path string
+	handle       sessionHandler
+	admin        bool
+}
+
+func (a *application) eventRoutes() []eventRoute {
+	return []eventRoute{
+		{"GET", "/api/admin/events/{id}", a.getEvent, false},
+		{"PUT", "/api/admin/events/{id}", a.updateEvent, false},
+		{"DELETE", "/api/admin/events/{id}", a.deleteEvent, false},
+		{"PUT", "/api/admin/events/{id}/owner", a.transferOwner, true},
+		{"GET", "/api/admin/events/{id}/immich", a.immichStatus, false},
+		{"POST", "/api/admin/events/{id}/immich/album", a.immichProvision, false},
+		{"PUT", "/api/admin/events/{id}/immich/auto-import", a.immichAutoImport, false},
+		{"POST", "/api/admin/events/{id}/immich/test", a.immichTest, false},
+		{"POST", "/api/admin/events/{id}/immich/jobs", a.immichStart, false},
+		{"POST", "/api/admin/events/{id}/immich/cancel", a.immichCancel, false},
+	}
+}
+
+func scope(s auth.Session) events.Scope { return events.Scope{HostID: s.Host.ID, All: s.Admin()} }
+
+// owned answers 404 for an event the caller may not see, exactly as for an
+// event that does not exist, so event ids cannot be probed.
+func (a *application) owned(next sessionHandler) sessionHandler {
+	return func(w http.ResponseWriter, r *http.Request, s auth.Session) {
+		owner, err := a.events.OwnerOf(r.Context(), internalID(r))
+		if errors.Is(err, sql.ErrNoRows) || err == nil && !s.Admin() && owner != s.Host.ID {
+			apiError(w, 404, "not_found", "Event not found", nil)
+			return
+		}
+		if err != nil {
+			a.fail(w, err)
+			return
+		}
+		next(w, r, s)
+	}
+}
+
+func (a *application) adminOnly(next sessionHandler) sessionHandler {
+	return func(w http.ResponseWriter, r *http.Request, s auth.Session) {
+		if !s.Admin() {
+			apiError(w, 403, "admin_required", "Only an administrator can do this", nil)
+			return
+		}
+		next(w, r, s)
+	}
+}
+
+func (a *application) listHosts(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	hosts, err := a.auth.Hosts(r.Context())
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"hosts": hosts})
+}
+
+func (a *application) updateHost(w http.ResponseWriter, r *http.Request, s auth.Session) {
+	var input struct {
+		Disabled *bool `json:"disabled"`
+	}
+	if !decodeJSON(w, r, &input, 1024) {
+		return
+	}
+	if input.Disabled == nil {
+		apiError(w, 422, "validation", "Check the host fields", map[string]string{"disabled": "Disabled must be a boolean"})
+		return
+	}
+	err := a.auth.SetDisabled(r.Context(), s.Host.ID, internalID(r), *input.Disabled)
+	switch {
+	case errors.Is(err, auth.ErrSelf):
+		apiError(w, 409, "host_self", auth.ErrSelf.Error(), nil)
+	case errors.Is(err, sql.ErrNoRows):
+		apiError(w, 404, "not_found", "Host not found", nil)
+	case err != nil:
+		a.fail(w, err)
+	default:
+		a.logger.Info("host updated", "host_id", internalID(r), "disabled", *input.Disabled)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func (a *application) transferOwner(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	var input struct {
+		HostID int64 `json:"host_id"`
+	}
+	if !decodeJSON(w, r, &input, 1024) {
+		return
+	}
+	e, err := a.events.TransferOwner(r.Context(), internalID(r), input.HostID)
+	switch {
+	case errors.Is(err, events.ErrOwnerHost):
+		apiError(w, 422, "owner_host", events.ErrOwnerHost.Error(), map[string]string{"host_id": events.ErrOwnerHost.Error()})
+	case errors.Is(err, events.ErrOwnerLocked):
+		apiError(w, 409, "owner_locked", events.ErrOwnerLocked.Error(), nil)
+	case errors.Is(err, events.ErrOwnerBusy):
+		apiError(w, 409, "immich_active", events.ErrOwnerBusy.Error(), nil)
+	case err != nil:
+		a.fail(w, err)
+	default:
+		a.logger.Info("event owner changed", "event_id", e.ID, "host_id", e.Owner.ID)
+		a.writeAdminEvent(w, r, e)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -357,8 +470,8 @@ func (a *application) adminEvent(e events.Event) adminEvent {
 	return adminEvent{Event: e, Status: e.Status(time.Now()), PublicURL: a.baseURL + "/e/" + e.PublicID}
 }
 
-func (a *application) listEvents(w http.ResponseWriter, r *http.Request, _ auth.Session) {
-	list, err := a.events.List(r.Context())
+func (a *application) listEvents(w http.ResponseWriter, r *http.Request, s auth.Session) {
+	list, err := a.events.List(r.Context(), scope(s))
 	if err != nil {
 		a.fail(w, err)
 		return
@@ -385,8 +498,8 @@ func internalID(r *http.Request) int64 {
 	return id
 }
 
-func (a *application) getEvent(w http.ResponseWriter, r *http.Request, _ auth.Session) {
-	e, err := a.events.Get(r.Context(), internalID(r))
+func (a *application) getEvent(w http.ResponseWriter, r *http.Request, s auth.Session) {
+	e, err := a.events.Get(r.Context(), scope(s), internalID(r))
 	if err != nil {
 		a.fail(w, err)
 		return
@@ -394,7 +507,7 @@ func (a *application) getEvent(w http.ResponseWriter, r *http.Request, _ auth.Se
 	a.writeAdminEvent(w, r, e)
 }
 
-func (a *application) createEvent(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+func (a *application) createEvent(w http.ResponseWriter, r *http.Request, s auth.Session) {
 	var input struct {
 		events.Input
 		Immich *struct {
@@ -413,9 +526,9 @@ func (a *application) createEvent(w http.ResponseWriter, r *http.Request, _ auth
 	var e events.Event
 	var err error
 	if input.Immich == nil {
-		e, err = a.events.Create(r.Context(), input.Input)
+		e, err = a.events.Create(r.Context(), s.Host.ID, input.Input)
 	} else {
-		e, err = a.immich.CreateEvent(r.Context(), input.Input, input.Immich.Target, input.Immich.AlbumName, input.Immich.AutoImport)
+		e, err = a.immich.CreateEvent(r.Context(), s.Host.ID, input.Input, input.Immich.Target, input.Immich.AlbumName, input.Immich.AutoImport)
 	}
 	if err != nil {
 		if errors.Is(err, immich.ErrInput) || errors.Is(err, immich.ErrCredentials) {
@@ -430,7 +543,7 @@ func (a *application) createEvent(w http.ResponseWriter, r *http.Request, _ auth
 	writeJSON(w, 201, map[string]any{"event": a.adminEvent(e)})
 }
 
-func (a *application) updateEvent(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+func (a *application) updateEvent(w http.ResponseWriter, r *http.Request, s auth.Session) {
 	var input events.Input
 	if !decodeJSON(w, r, &input, 32768) {
 		return
@@ -439,7 +552,7 @@ func (a *application) updateEvent(w http.ResponseWriter, r *http.Request, _ auth
 		a.fail(w, err)
 		return
 	}
-	e, err := a.events.Update(r.Context(), internalID(r), input)
+	e, err := a.events.Update(r.Context(), scope(s), internalID(r), input)
 	if err != nil {
 		a.fail(w, err)
 		return

@@ -43,7 +43,7 @@ func fixture(t *testing.T) (*Service, string, events.Event, Session) {
 func createEvent(t *testing.T, s *Service) events.Event {
 	t.Helper()
 	enabled := true
-	e, err := s.events.Create(t.Context(), events.Input{Name: "Upload test", Enabled: &enabled})
+	e, err := s.events.Create(t.Context(), 1, events.Input{Name: "Upload test", Enabled: &enabled})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestFailureRecoveryAndPartialDeletion(t *testing.T) {
 	if err := s.DeleteEvent(t.Context(), e.ID); !errors.Is(err, ErrDeleting) {
 		t.Fatalf("partial deletion: %v", err)
 	}
-	current, err := s.events.Get(t.Context(), e.ID)
+	current, err := s.events.Get(t.Context(), events.System, e.ID)
 	if err != nil || !current.Deleting || current.Enabled {
 		t.Fatal("partial deletion did not persist closed state")
 	}

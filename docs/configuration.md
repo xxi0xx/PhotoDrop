@@ -36,13 +36,18 @@ Immich backend identity. Password mode ignores OIDC settings and contacts no pro
 | `PHOTODROP_OIDC_ISSUER` | Required | Exact absolute HTTPS URL, paths/trailing slash preserved; no userinfo/query/fragment; HTTP only on loopback | Provider address |
 | `PHOTODROP_OIDC_CLIENT_ID` | Required | Nonempty client ID, at most 4096 bytes, no control characters | Internal identifier |
 | `PHOTODROP_OIDC_CLIENT_SECRET` | Required | Confidential client secret, at most 4096 bytes, no control characters | Secret |
-| `PHOTODROP_OIDC_ALLOWED_SUBJECTS` | Empty; one allowlist required | Comma-separated exact stable `sub` values, trimmed around commas; at most 64 entries, 512 bytes each, 8192 total; no empty entries/control characters | Private authorization policy |
-| `PHOTODROP_OIDC_ALLOWED_GROUPS` | Empty; one allowlist required | Same list format; exact case-sensitive group names | Private authorization policy |
+| `PHOTODROP_OIDC_ALLOWED_SUBJECTS` | Empty; one of the four role lists required | Comma-separated exact stable `sub` values, trimmed around commas; at most 64 entries, 512 bytes each, 8192 total; no empty entries/control characters. Grants the **admin** role | Private authorization policy |
+| `PHOTODROP_OIDC_ALLOWED_GROUPS` | Empty; one of the four role lists required | Same list format; exact case-sensitive group names. Grants the **admin** role | Private authorization policy |
+| `PHOTODROP_OIDC_HOST_SUBJECTS` | Empty | Same list format as `PHOTODROP_OIDC_ALLOWED_SUBJECTS`. Grants the **host** role | Private authorization policy |
+| `PHOTODROP_OIDC_HOST_GROUPS` | Empty | Same list format as `PHOTODROP_OIDC_ALLOWED_GROUPS`. Grants the **host** role | Private authorization policy |
 | `PHOTODROP_OIDC_GROUPS_CLAIM` | `groups` | Top-level ID-token JSON claim name, at most 256 bytes, no whitespace/control characters; array of strings required when present and group authorization enabled | Claim mapping |
-| `PHOTODROP_OIDC_SCOPES` | `openid profile email` | Single-space-separated OAuth scope tokens, at most 1024 bytes; printable ASCII excluding quote/backslash; `openid` always added, duplicates removed | Requested claims |
+| `PHOTODROP_OIDC_SCOPES` | `openid profile email` | Single-space-separated OAuth scope tokens, at most 1024 bytes; printable ASCII excluding quote/backslash; `openid` always added, duplicates removed. An override must keep `profile` and `email`: host names and Immich linking use them | Requested claims |
 
-Subject allowlist **OR** any allowed group grants the same PhotoDrop administrator
-access. Email/name is never an authorization boundary. Malformed group claims fail
+The role is derived again at every sign-in: a subject or group in the admin lists
+grants **admin**; otherwise one in the host lists grants **host**; otherwise sign-in
+is refused. Admin wins when both match. Admins see and manage every event and
+host; a host sees and manages only its own events. Email/name is never an
+authorization boundary. Malformed group claims fail
 closed; a missing group claim cannot satisfy group authorization. Claims must be
 in the ID token, not only UserInfo. See [OIDC and Authentik setup](oidc.md).
 

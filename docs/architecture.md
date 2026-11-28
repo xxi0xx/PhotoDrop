@@ -25,17 +25,19 @@ identity; switches affect future uploads. Runtime credentials resolve old backen
 Uncertain direct attempts preserve IDs and finalize first; confirmed expiry/cleanup
 can establish a new grant. Recovery is page-scoped, not resumable multipart upload.
 
-One administrator uses hashed credentials, opaque persistent sessions and CSRF/origin
-checks. Guests use event-scoped grants, optional Turnstile and unverified contributor
+Hosts sign in with the administrator password (host 1) or OIDC and get opaque
+persistent sessions with CSRF/origin checks. Each event has one owner host;
+administrators see every event, hosts only their own. Guests use event-scoped grants, optional Turnstile and unverified contributor
 labels. Limits/quotas bound abuse; signature sniffing is not malware analysis.
 Export streams ready assets to ordinary files/manifest. Immich jobs persist/recover
 in SQLite; Immich remains independent with separate originals/backups. Credentials
 stay in runtime configuration, never frontend bundles or backend identity records.
 
-Native OIDC is optional administrator login only: authorization-code + PKCE with
-lazy discovery and signed ID-token validation, then the same opaque local session
-used by passwords. SQLite holds one-time browser-bound login transactions for five
-minutes, never provider tokens. Subject/group allowlists authorize at login. The
+Native OIDC is optional login for administrators and hosts: authorization-code +
+PKCE with lazy discovery and signed ID-token validation, then the same opaque local
+session used by passwords. SQLite holds one-time browser-bound login transactions
+for five minutes, never provider tokens. Subject/group lists derive the role at
+every login, and the identity maps to a row in `hosts` (migration 013). The
 provider is outside subsequent API/session checks, public pages, uploads and health.
 
 Immich automatic import is an opt-in policy on each event/target binding. The

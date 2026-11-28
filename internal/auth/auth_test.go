@@ -38,7 +38,7 @@ func TestSessionLifecycleAndCredentialRotation(t *testing.T) {
 	if !validToken(token) || !validToken(session.CSRFToken) || token == session.CSRFToken || time.Until(session.ExpiresAt) > SessionLifetime {
 		t.Fatal("invalid session credentials")
 	}
-	if err := db.QueryRow("SELECT token_hash FROM admin_sessions").Scan(&stored); err != nil {
+	if err := db.QueryRow("SELECT token_hash FROM host_sessions").Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 	if stored == token || stored != tokenHash(token) {
@@ -76,7 +76,7 @@ func TestSessionLifecycleAndCredentialRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("UPDATE admin_sessions SET expires_at = ?", time.Now().Unix()); err != nil {
+	if _, err := db.Exec("UPDATE host_sessions SET expires_at = ?", time.Now().Unix()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.Lookup(t.Context(), token); !errors.Is(err, ErrUnauthorized) {
@@ -105,7 +105,7 @@ func TestSessionOnlyAndPasswordRotation(t *testing.T) {
 	}
 	defer db.Close()
 	m := NewSessionOnly(db)
-	token, session, err := m.CreateSession(t.Context(), "")
+	token, session, err := m.CreateSession(t.Context(), "", PasswordHostID)
 	if err != nil {
 		t.Fatal(err)
 	}

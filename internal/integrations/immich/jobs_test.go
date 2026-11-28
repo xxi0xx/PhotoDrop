@@ -141,7 +141,7 @@ func jobsFixture(t *testing.T, count int) (*Service, *fakeAPI, func(string), eve
 	}
 	source := media.New(db, objects, logger)
 	on := true
-	e, err := events.New(db).Create(t.Context(), events.Input{Name: "Import test", Enabled: &on})
+	e, err := events.New(db).Create(t.Context(), 1, events.Input{Name: "Import test", Enabled: &on})
 	if err != nil {
 		t.Fatal(err)
 	}

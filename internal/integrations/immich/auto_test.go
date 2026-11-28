@@ -256,7 +256,7 @@ func TestAutoOffDisableAndCancellation(t *testing.T) {
 func TestAutoProvisioningAndFailedProvisionRetry(t *testing.T) {
 	s, f, _, _ := jobsFixture(t, 0)
 	on := true
-	e, err := s.CreateEvent(t.Context(), events.Input{Name: "Automatic", Enabled: &on}, "test", "", true)
+	e, err := s.CreateEvent(t.Context(), 1, events.Input{Name: "Automatic", Enabled: &on}, "test", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestAutoProvisioningAndFailedProvisionRetry(t *testing.T) {
 func TestAutoZeroMediaNeedsOnlyProvisioning(t *testing.T) {
 	s, _, _, _ := jobsFixture(t, 0)
 	on := true
-	e, err := s.CreateEvent(t.Context(), events.Input{Name: "Empty automatic event", Enabled: &on}, "test", "", true)
+	e, err := s.CreateEvent(t.Context(), 1, events.Input{Name: "Empty automatic event", Enabled: &on}, "test", "", true)
 	if err != nil {
 		t.Fatal(err)
 	}

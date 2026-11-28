@@ -24,13 +24,13 @@ func TestCRUDAndPublicIDs(t *testing.T) {
 	}
 	defer db.Close()
 	s := New(db)
-	list, err := s.List(t.Context())
+	list, err := s.List(t.Context(), System)
 	if err != nil || list == nil || len(list) != 0 {
 		t.Fatalf("empty list: %v, %v", list, err)
 	}
 	seen := map[string]bool{}
 	for range 50 {
-		e, err := s.Create(t.Context(), input())
+		e, err := s.Create(t.Context(), 1, input())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -39,7 +39,7 @@ func TestCRUDAndPublicIDs(t *testing.T) {
 		}
 		seen[e.PublicID] = true
 	}
-	list, err = s.List(t.Context())
+	list, err = s.List(t.Context(), System)
 	if err != nil || len(list) != 50 {
 		t.Fatalf("list: %d, %v", len(list), err)
 	}
@@ -59,7 +59,7 @@ func TestCRUDAndPublicIDs(t *testing.T) {
 	in.Enabled = pointer(false)
 	in.EventDate = pointer("2026-09-04")
 	in.ExpiresAt = pointer("2026-09-05T01:00:00-05:00")
-	updated, err := s.Update(t.Context(), e.ID, in)
+	updated, err := s.Update(t.Context(), System, e.ID, in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestCRUDAndPublicIDs(t *testing.T) {
 	if err := s.Delete(t.Context(), e.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Get(t.Context(), e.ID); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.Get(t.Context(), System, e.ID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("deleted event still present: %v", err)
 	}
 	if _, err := s.GetPublic(t.Context(), e.PublicID); !errors.Is(err, sql.ErrNoRows) {
@@ -81,7 +81,7 @@ func TestCRUDAndPublicIDs(t *testing.T) {
 	if err := s.Delete(t.Context(), e.ID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("missing delete: %v", err)
 	}
-	if _, err := s.Update(t.Context(), e.ID, input()); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := s.Update(t.Context(), System, e.ID, input()); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("missing update: %v", err)
 	}
 }
@@ -123,5 +123,51 @@ func TestExpiration(t *testing.T) {
 	e := Event{Enabled: true, ExpiresAt: &now}
 	if e.Status(now) != "expired" || e.Status(now.Add(-time.Second)) != "open" {
 		t.Fatal("expiration boundary is incorrect")
+	}
+}
+
+func TestScopeLimitsHostsToTheirOwnEvents(t *testing.T) {
+	db, err := database.Open(t.Context(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`INSERT INTO hosts(id,role,display_name,oidc_issuer,oidc_subject,created_at) VALUES(2,'host','Second host','https://idp.test/','second','old')`); err != nil {
+		t.Fatal(err)
+	}
+	s := New(db)
+	mine, err := s.Create(t.Context(), 2, input())
+	if err != nil || mine.Owner != (Owner{2, "Second host"}) {
+		t.Fatal("create did not record the owner", mine.Owner, err)
+	}
+	other, err := s.Create(t.Context(), 1, input())
+	if err != nil || other.Owner != (Owner{1, "Administrator"}) {
+		t.Fatal(other.Owner, err)
+	}
+	host := Scope{HostID: 2}
+	list, err := s.List(t.Context(), host)
+	if err != nil || len(list) != 1 || list[0].ID != mine.ID || list[0].Owner.DisplayName != "Second host" {
+		t.Fatal("host list", list, err)
+	}
+	if all, err := s.List(t.Context(), System); err != nil || len(all) != 2 {
+		t.Fatal("system list", all, err)
+	}
+	if _, err := s.Get(t.Context(), host, other.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("host read another host's event", err)
+	}
+	if _, err := s.Update(t.Context(), host, other.ID, input()); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal("host updated another host's event", err)
+	}
+	if updated, err := s.Update(t.Context(), host, mine.ID, input()); err != nil || updated.Owner != mine.Owner {
+		t.Fatal("owner lost on update", updated.Owner, err)
+	}
+	if owner, err := s.OwnerOf(t.Context(), other.ID); err != nil || owner != 1 {
+		t.Fatal(owner, err)
+	}
+	if _, err := s.OwnerOf(t.Context(), 999); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatal(err)
+	}
+	if _, err := s.Create(t.Context(), 99, input()); err == nil {
+		t.Fatal("event created for a host that does not exist")
 	}
 }

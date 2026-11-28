@@ -53,7 +53,7 @@ func TestDirectUploadHTTPDataPathAndIsolation(t *testing.T) {
 	}
 	enabled := true
 	store := events.New(db)
-	e, err := store.Create(t.Context(), events.Input{Name: "Direct test", Enabled: &enabled})
+	e, err := store.Create(t.Context(), 1, events.Input{Name: "Direct test", Enabled: &enabled})
 	if err != nil {
 		t.Fatal(err)
 	}

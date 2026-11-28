@@ -1,5 +1,8 @@
 import { retryAfterAt } from './upload-ux';
-export type Session = { csrf_token: string; expires_at: string };
+export type Role = 'admin' | 'host';
+export type SessionHost = { id: number; role: Role; display_name: string };
+export type Session = { csrf_token: string; expires_at: string; host: SessionHost };
+export type HostRecord = { id: number; role: Role; display_name: string; email: string | null; oidc: boolean; password: boolean; disabled: boolean; created_at: string; last_login_at: string | null };
 export type TypeStats = { ready_count: number; bytes: number; pending_count: number; reserved_bytes: number };
 export type EventRecord = {
   id: number; public_id: string; name: string; description: string;
@@ -9,6 +12,7 @@ export type EventRecord = {
   max_photos: number | null; max_videos: number | null; max_photo_file_bytes: number | null; max_video_file_bytes: number | null; max_photo_storage_bytes: number | null; max_video_storage_bytes: number | null;
   media: { photos: TypeStats; videos: TypeStats; ready_count: number; photo_count: number; storage_bytes: number; pending_count?: number; reserved_bytes?: number };
   contributors?: { name: string | null; photo_count: number }[];
+  owner: { id: number; display_name: string };
 };
 export type Challenge = { site_key: string; action: string };
 export type GuestEvent = { name: string; status: 'open' | 'closed'; description?: string; event_date?: string; max_file_size?: number; max_photo_file_size?: number; max_video_file_size?: number; challenge?: Challenge };
@@ -35,7 +39,15 @@ export async function request<T>(path: string, method = 'GET', data?: unknown): 
   }
   return response.status === 204 ? undefined as T : response.json();
 }
-export async function loadSession(): Promise<void> { csrfToken = (await request<Session>('/api/admin/session')).csrf_token; }
+// The signed-in host is display and navigation data only; the server enforces access.
+let currentHost: SessionHost | null = null;
+export async function loadSession(): Promise<Session> {
+  const session = await request<Session>('/api/admin/session');
+  csrfToken = session.csrf_token; currentHost = session.host;
+  return session;
+}
+export function sessionHost(): SessionHost | null { return currentHost; }
+export function isAdmin(): boolean { return currentHost?.role === 'admin'; }
 export function message(error: unknown): string { return error instanceof Error ? error.message : 'Something went wrong. Please try again.'; }
 export function publicURL(event: EventRecord): string { return new URL(event.public_url, window.location.origin).href; }
 export function displayDate(value?: string | null): string { return value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'long' }).format(new Date(`${value}T12:00:00`)) : 'No event date'; }

@@ -33,7 +33,7 @@ func TestImmichAdminBoundaryAndHealth(t *testing.T) {
 		t.Fatal("optional integration blocked startup", err)
 	}
 	enabled := true
-	if _, err := events.New(db).Create(t.Context(), events.Input{Name: "Test", Enabled: &enabled}); err != nil {
+	if _, err := events.New(db).Create(t.Context(), 1, events.Input{Name: "Test", Enabled: &enabled}); err != nil {
 		t.Fatal(err)
 	}
 	call := func(method, path, body string, cookie *http.Cookie, csrf, origin string) *httptest.ResponseRecorder {

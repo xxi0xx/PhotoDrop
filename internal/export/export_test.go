@@ -34,7 +34,7 @@ func TestExportManifestNamesBytesAndFailure(t *testing.T) {
 			}
 			s := media.New(db, objects, logger)
 			enabled := true
-			e, err := events.New(db).Create(t.Context(), events.Input{Name: "Export event", Enabled: &enabled})
+			e, err := events.New(db).Create(t.Context(), 1, events.Input{Name: "Export event", Enabled: &enabled})
 			if err != nil {
 				t.Fatal(err)
 			}
